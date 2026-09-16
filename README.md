@@ -44,10 +44,7 @@ echo "GEMINI_API_KEY=your-key-here" >> .env
 
 ## Model weights (label detector)
 
-The label/archival-region detector needs a trained `.pt` checkpoint.
-Checkpoints aren't committed to the repo — `.gitignore` excludes
-`*.pt`/`weights/` on purpose, since these are large binaries better shared
-as a download than as git history.
+The label/archival-region detector needs a trained `.pt` checkpoint or you can simply use opencv.
 
 ### LeafMachine2/YOLOv5 backend (default) — `archival_detector_best.pt`
 
@@ -74,11 +71,8 @@ unzip -p /tmp/leafmachine2_release.zip release_v-2-1/acd/best.pt \
 herbaudit --input ./scans --model gemini-2.5-flash --weights ~/.herbaudit/models/archival_detector_best.pt
 ```
 
-`resolve_weights_backend()` auto-detects which loader a given checkpoint
-needs (LeafMachine2/YOLOv5 vs. ultralytics YOLOv8/v11/v12/YOLO-World) — you
-don't need to tell it which one you're pointing at. Without `--weights`,
-HerbAudit falls back to plain OpenCV contour detection (no label-region
-model needed, lower accuracy on cluttered sheets).
+
+
 
 ## Usage
 
@@ -104,4 +98,12 @@ herbaudit --input ./scans --model gemini-2.5-flash --weights ./weights/my_detect
 
 Run `herbaudit --help` for the full flag reference.
 
+## Citation
 
+HerbAudit's default label detector is the Archival Component Detector from
+LeafMachine2. If you use HerbAudit with that detector, please also cite:
+
+> Weaver, W. N., & Smith, S. A. (2023). From leaves to labels: Building
+> modular machine learning networks for rapid herbarium specimen analysis
+> with LeafMachine2. *Applications in Plant Sciences*, 11(5), e11548.
+> https://doi.org/10.1002/aps3.11548
