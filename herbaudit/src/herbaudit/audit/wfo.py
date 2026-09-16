@@ -33,11 +33,7 @@ _WFO_HEADERS = {
 #       -servername list.worldfloraonline.org -showcerts
 _WFO_INTERMEDIATE_CERT_FILE = Path(__file__).parent / "wfo_intermediate.pem"
 
-# Built CA bundle is cached under ~/.herbaudit/ (same convention as
-# DEFAULT_WEIGHTS/DEFAULT_CONFIG_PATH in cli.py), not a cwd-relative path —
-# a bare Path(".wfo_ca_bundle.pem") would resolve against whatever directory
-# the tool happens to be invoked from, silently rebuilding on every run from
-# a new cwd instead of reusing the one already built.
+
 _WFO_CA_BUNDLE_FILE = Path.home() / ".herbaudit" / "wfo_ca_bundle.pem"
 _wfo_ca_bundle_path: str | None = None
 
