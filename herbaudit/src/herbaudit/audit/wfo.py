@@ -12,19 +12,6 @@ from .text import strip_authors
 from .gbif import check_gbif_backbone_fallback
 
 
-# WFO's name matching service is the taxonomy source for accepted/synonym
-# resolution and existence checks. Every WFO match carries a classification
-# "placement" path; a synonym's placement embeds the accepted taxon's own
-# path before a '$' separator, e.g.:
-#   accepted:  "Code/Plantae/.../Euonymus/echinatus"
-#   synonym:   "Code/Plantae/.../Euonymus/echinatus$Euonymus/trichocarpus"
-# So the path *before* the '$' (or the whole path, when there is no '$')
-# always identifies the currently-accepted taxon.
-#
-# Full synonym-resolution stays limited by one heuristic gap: WFO's
-# matching_rest.php has no taxonomicStatus field, so the "$"-in-placement
-# check can only distinguish synonym vs. not-a-synonym, not "accepted" from
-# any other non-synonym status.
 _WFO_ENABLED = True
 
 _WFO_CACHE: dict = {}   # clean binomial → (accepted_clean_binomial, accepted_path, is_synonym)
