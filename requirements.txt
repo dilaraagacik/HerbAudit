@@ -1,0 +1,30 @@
+pandas
+requests
+openpyxl
+python-dotenv
+litellm
+ftfy
+unidecode
+python-Levenshtein
+urllib3
+openai
+google-genai
+opencv-python
+numpy
+python-dateutil
+hdx-python-country
+tomli; python_version < "3.11"   # tomllib is stdlib on 3.11+; this backports it for 3.8-3.10
+
+# LeafMachine2 Archival Component Detector (herbaudit/vendor/leafmachine2_detector)
+torch
+torchvision
+matplotlib
+seaborn
+PyYAML
+Pillow
+
+# Optional: only needed for --detector ultralytics (checkpoints trained with
+# ultralytics' own tooling — YOLOv8/v11/v12, YOLO-World — that the vendored
+# LeafMachine2 loader above can't read). AGPL-3.0, not installed by default;
+# `pip install ultralytics` yourself if you use that detector path.
+# ultralytics

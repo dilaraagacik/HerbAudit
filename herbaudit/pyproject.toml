@@ -1,0 +1,59 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "herbaudit"
+version = "0.1.0"
+description = "An AI-powered herbarium specimen audit tool"
+readme = "README.md"
+license = "GPL-3.0-or-later"
+requires-python = ">=3.10"
+authors = [
+    { name = "Dilara Agacik", email = "dilara.agacik@ugent.be" },
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+# Note: no "License :: OSI Approved :: ..." classifier alongside the SPDX
+# `license` expression above — modern setuptools (PEP 639) treats license
+# classifiers as superseded by SPDX license expressions and errors out if
+# both are present.
+dependencies = [
+    "pandas",
+    "requests",
+    "openpyxl",
+    "python-dotenv",
+    "litellm",
+    "ftfy",
+    "unidecode",
+    "python-Levenshtein",
+    "urllib3",
+    "openai",
+    "google-genai",
+    "opencv-python",
+    "numpy",
+    "python-dateutil",
+    "hdx-python-country",
+    'tomli; python_version < "3.11"',
+    "torch",
+    "torchvision",
+    "matplotlib",
+    "seaborn",
+    "PyYAML",
+    "Pillow",
+]
+
+[project.optional-dependencies]
+ultralytics = ["ultralytics"]
+
+[project.scripts]
+herbaudit = "herbaudit.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"herbaudit.audit" = ["wfo_intermediate.pem", "files/*.json"]
+"herbaudit.vendor.leafmachine2_detector" = ["LICENSE", "NOTICE.md"]

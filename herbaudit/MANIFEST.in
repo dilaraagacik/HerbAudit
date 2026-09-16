@@ -1,0 +1,7 @@
+include LICENSE
+include README.md
+recursive-include src/herbaudit/audit/files *.json
+include src/herbaudit/audit/wfo_intermediate.pem
+recursive-include src/herbaudit/vendor *
+global-exclude __pycache__
+global-exclude *.py[cod]

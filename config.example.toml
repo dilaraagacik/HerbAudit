@@ -1,0 +1,19 @@
+# herbaudit config file — copy this to ~/.herbaudit/config.toml (or point
+# --config / HERBAUDIT_CONFIG at a copy elsewhere) to set your usual defaults.
+# Every value here can still be overridden per-run by the matching CLI flag.
+#
+# API keys are NOT read from this file — keep those in GEMINI_API_KEY /
+# OPENAI_API_KEY env vars (or a .env file that's git-ignored), never here.
+
+[model]
+model = "gemini-3.5-flash-lite"  # one flag for any provider — name alone picks it
+                                  # (gemini* -> Gemini, gpt*/o1*/o3*/o4*/chatgpt*/text-* ->
+                                  # OpenAI, anything else -> Ollama)
+ollama_host = "http://localhost:11434"
+
+[report]
+no_reference = false
+
+[image]
+detector = "auto"                # "auto" | "opencv"
+no_collage = false
