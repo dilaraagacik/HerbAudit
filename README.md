@@ -71,7 +71,7 @@ unzip -p /tmp/leafmachine2_release.zip release_v-2-1/acd/best.pt \
 
 
 ```bash
-herbaudit --input ./scans --model gemini-2.5-flash --weights ~/.herbaudit/models/archival_detector_best.pt
+herbaudit --input herbaudit/test/5173738301.jpg --model gemini-3.5-flash-lite 
 ```
 
 
