@@ -1,0 +1,42 @@
+{
+  "_readme": "Manual ground-truth annotations, keyed by catalog number (= image filename stem). compare_models.py falls back to an entry here whenever fetch_gbif_data() finds no published GBIF occurrence for that specimen (e.g. these GENT herbarium sheets aren't on GBIF). Edit the 'fields' block to correct each value against the actual label/scan in files/<catalogNumber>.jpg. Add new entries the same way for any other unpublished specimen you want scored for real accuracy instead of just field completeness.",
+  "GENT10099346": {
+    "fields": {
+      "scientificName": "Anonidium mannii (Oliv.) Engl. & Diels",
+      "genus": "Anonidium",
+      "specificEpithet": "mannii",
+      "recordedBy": "Léonard, J.",
+      "eventDate": "1946-08-29",
+      "catalogNumber": "GENT10099346",
+      "country": "Democratic Republic of the Congo",
+      "stateProvince": "Équateur",
+      "locality": "Km 26, route Bikoro"
+    }
+  },
+  "GENT10099452": {
+    "fields": {
+      "scientificName": "Artabotrys madagascariensis Miq.",
+      "genus": "Artabotrys",
+      "specificEpithet": "madagascariensis",
+      "recordedBy": "Appert, Otto",
+      "eventDate": "1964-04-19",
+      "catalogNumber": "GENT10099452",
+      "country": "Madagascar",
+      "stateProvince": "",
+      "locality": "ca. 5km N Ankiliabo, SW-Madagascar"
+    }
+  },
+  "GENT10815595": {
+    "fields": {
+      "scientificName": "Epilobium parviflorum Schreb.",
+      "genus": "Epilobium",
+      "specificEpithet": "parviflorum",
+      "recordedBy": "De Waele, K.",
+      "eventDate": "1976-09-08",
+      "catalogNumber": "GENT10815595",
+      "country": "Belgium",
+      "stateProvince": "",
+      "locality": "O. Vl., Huize, Lozer D2 57 42"
+    }
+  }
+}

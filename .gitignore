@@ -28,7 +28,7 @@ json_report.html
 collage_results/
 
 # working data (specimen images, exported label projects, ad-hoc results)
-files/
+/files/
 
 # Caches
 .wfo_cache.json
