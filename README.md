@@ -30,8 +30,12 @@ python3 -m venv venv_herbaudit
 source venv_herbaudit/bin/activate      # Windows: venv_herbaudit\Scripts\activate
 
 pip install -e ./herbaudit
-```
 
+```
+Try it out and see whether it was uploaded successfully.
+```bash
+herbaudit --help
+```
 Copy the example config and set an API key (only needed for Gemini/OpenAI —
 skip this for a local Ollama model):
 
