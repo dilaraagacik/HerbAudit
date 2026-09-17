@@ -23,12 +23,14 @@ Country = None
 EXCLUDED_SENTINEL = "__SYNONYM_EXCLUDED__"
 
 
-def token_pair_cer(tru_tokens: list[str], ext_tokens: list[str]) -> float:
+def token_pair_cer(tru_tokens: list[str], ext_tokens: list[str],
+                    penalize_truth_unmatched: bool = True) -> float:
     """Score token-level similarity by pairing tru_tokens/ext_tokens globally
     best-match-first (not left-to-right), so a short common word can't steal
     the pairing slot meant for the real match. Combines matched/total
     character counts into one CER-based ratio; any unpaired token still
-    counts its full length against the total."""
+    counts its full length against the total, unless penalize_truth_unmatched
+    is False, which excludes unpaired truth tokens (not extraction tokens)."""
     pairs = []
     for i, tw in enumerate(tru_tokens):
         for j, ew in enumerate(ext_tokens):
@@ -46,11 +48,12 @@ def token_pair_cer(tru_tokens: list[str], ext_tokens: list[str]) -> float:
         t_used.add(i)
         e_used.add(j)
         tw, ew = tru_tokens[i], ext_tokens[j]
-        total_matched += 2 * max(len(tw), len(ew)) * cer
+        total_matched += (len(tw) + len(ew)) * cer
         total_len += len(tw) + len(ew)
-    for i, tw in enumerate(tru_tokens):
-        if i not in t_used:
-            total_len += len(tw)
+    if penalize_truth_unmatched:
+        for i, tw in enumerate(tru_tokens):
+            if i not in t_used:
+                total_len += len(tw)
     for j, ew in enumerate(ext_tokens):
         if j not in e_used:
             total_len += len(ew)
@@ -159,7 +162,8 @@ def _baseline_accuracy(t_raw, e_raw, target, extraction, is_tax, is_coll, is_dat
             # punctuate the same content differently (comma vs. dash).
             t_words = normalize_for_similarity(t_raw).split()
             e_words = normalize_for_similarity(e_raw).split()
-            ratio = token_pair_cer(t_words, e_words)
+            # Truth locality often has GBIF-added detail no label could show.
+            ratio = token_pair_cer(t_words, e_words, penalize_truth_unmatched=False)
 
             return ratio, "geo-cer-bag", ("#d1e7dd" if ratio >= 0.70 else "#f8d7da"), ""
 

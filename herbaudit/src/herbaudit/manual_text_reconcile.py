@@ -77,7 +77,7 @@ def _token_pair_cer(tru_tokens: list[str], ext_tokens: list[str]) -> float:
         t_used.add(i)
         e_used.add(j)
         tw, ew = tru_tokens[i], ext_tokens[j]
-        total_matched += 2 * max(len(tw), len(ew)) * cer
+        total_matched += (len(tw) + len(ew)) * cer
         total_len += len(tw) + len(ew)
     for i, tw in enumerate(tru_tokens):
         if i not in t_used:
