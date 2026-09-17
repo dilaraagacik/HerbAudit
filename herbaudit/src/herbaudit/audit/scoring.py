@@ -24,13 +24,24 @@ EXCLUDED_SENTINEL = "__SYNONYM_EXCLUDED__"
 
 
 def token_pair_cer(tru_tokens: list[str], ext_tokens: list[str],
-                    penalize_truth_unmatched: bool = True) -> float:
+                    penalize_truth_unmatched: bool = True,
+                    truth_length_denominator: bool = False) -> float:
     """Score token-level similarity by pairing tru_tokens/ext_tokens globally
     best-match-first (not left-to-right), so a short common word can't steal
-    the pairing slot meant for the real match. Combines matched/total
-    character counts into one CER-based ratio; any unpaired token still
-    counts its full length against the total, unless penalize_truth_unmatched
-    is False, which excludes unpaired truth tokens (not extraction tokens)."""
+    the pairing slot meant for the real match.
+
+    Default mode combines matched/total character counts into one ratio
+    normalized by both sides' lengths (bounded 0-1 regardless of how the two
+    token lists compare in size); any unpaired token still counts its full
+    length against the total, unless penalize_truth_unmatched is False, which
+    excludes unpaired truth tokens (not extraction tokens).
+
+    truth_length_denominator=True switches to real CER: total edit cost
+    (substitutions on matched pairs, plus a full-length deletion cost per
+    unmatched truth token and insertion cost per unmatched extraction token)
+    divided by the truth tokens' total length alone — unbounded below 0%
+    if the extraction is much longer/wronger than the truth, clamped to 0
+    at the end since a negative score isn't meaningful to display."""
     pairs = []
     for i, tw in enumerate(tru_tokens):
         for j, ew in enumerate(ext_tokens):
@@ -41,6 +52,30 @@ def token_pair_cer(tru_tokens: list[str], ext_tokens: list[str],
 
     t_used: set[int] = set()
     e_used: set[int] = set()
+
+    if truth_length_denominator:
+        total_edit_cost = 0.0
+        for cer, i, j in pairs:
+            if i in t_used or j in e_used:
+                continue
+            t_used.add(i)
+            e_used.add(j)
+            tw, ew = tru_tokens[i], ext_tokens[j]
+            # A single-letter initial that's the first letter of the other
+            # side's word isn't an error — "j" vs "jacques" is the same
+            # person's name, just abbreviated differently. Free, not charged.
+            if (len(tw) == 1 and ew.startswith(tw)) or (len(ew) == 1 and tw.startswith(ew)):
+                continue
+            total_edit_cost += Levenshtein.distance(tw, ew)
+        for i, tw in enumerate(tru_tokens):
+            if i not in t_used:
+                total_edit_cost += len(tw)          # deletion: truth word never matched
+        for j, ew in enumerate(ext_tokens):
+            if j not in e_used:
+                total_edit_cost += len(ew)           # insertion: extra/fabricated word
+        truth_len = sum(len(tw) for tw in tru_tokens)
+        return max(0.0, 1.0 - total_edit_cost / truth_len) if truth_len else 0.0
+
     total_matched, total_len = 0.0, 0
     for cer, i, j in pairs:
         if i in t_used or j in e_used:
@@ -208,14 +243,27 @@ def _baseline_accuracy(t_raw, e_raw, target, extraction, is_tax, is_coll, is_dat
             # scoring, flagged distinctly from an actual synonym. A FUZZY
             # match doesn't qualify: GBIF had to rewrite the string to find
             # a hit, so the literal extracted text isn't itself a real name.
+            #
+            # Only exclude when it's the SAME family as the truth name — a
+            # plausible mix-up between related taxa. A different family
+            # entirely (e.g. truth is an oak, AI said a rose) is much more
+            # likely a genuine misidentification/hallucination than a valid
+            # alternate determination, so let it fall through to be scored
+            # via CER below instead of silently excluded from the average.
             a_match = _gbif_match_with_authorship_retry(extraction)
             if a_match is not None and a_match.get("matchType") == "EXACT":
-                status = (a_match.get("status") or "recognized").lower()
-                article = "an" if status[:1] in "aeiou" else "a"
-                return None, EXCLUDED_SENTINEL, "#fff8e1", (
-                    f"NOREL||'{clean_extr}' is {article} {status} name in GBIF's backbone taxonomy, "
-                    f"but has no relationship to GBIF truth name '{clean_target}'"
+                t_match = _gbif_match_with_authorship_retry(target)
+                same_family = (
+                    t_match is not None and a_match.get("family")
+                    and a_match.get("family") == t_match.get("family")
                 )
+                if same_family:
+                    status = (a_match.get("status") or "recognized").lower()
+                    article = "an" if status[:1] in "aeiou" else "a"
+                    return None, EXCLUDED_SENTINEL, "#fff8e1", (
+                        f"NOREL||'{clean_extr}' is {article} {status} name in GBIF's backbone taxonomy, "
+                        f"but has no relationship to GBIF truth name '{clean_target}'"
+                    )
 
     if is_date:
         d = date_accuracy(target, extraction)
@@ -225,10 +273,15 @@ def _baseline_accuracy(t_raw, e_raw, target, extraction, is_tax, is_coll, is_dat
         noise = {"et", "al", "and", "dr", "coll", "by", "collector", "collected", "leg", "det"}
 
         def _coll_tokens(text):
-            # Strip punctuation; single-letter tokens (initials) are kept and
-            # scored directly by token_pair_cer below.
+            # Strip bracketed annotations (e.g. a GBIF-appended "[1908-04]"
+            # date) and "s.n." ("sine numero" — no collection number), which
+            # aren't part of anyone's name, then punctuation. Single-letter
+            # tokens (initials) are kept and scored directly by
+            # token_pair_cer below; bare numbers are dropped entirely.
+            text = re.sub(r"\[.*?\]", " ", text)
+            text = re.sub(r"\bs\.?n\.?\b", " ", text, flags=re.I)
             stripped = re.sub(r"[^\w\s]", " ", text)
-            return [w for w in stripped.split() if w not in noise]
+            return [w for w in stripped.split() if w not in noise and not w.isdigit()]
 
         ext_tokens = _coll_tokens(e_raw)
         tru_tokens = _coll_tokens(t_raw)
@@ -239,11 +292,9 @@ def _baseline_accuracy(t_raw, e_raw, target, extraction, is_tax, is_coll, is_dat
             # Amangst" vs "Unangst, E. P.") without being able to fake one
             # alone — a matching initial can't rescue an unrelated surname
             # ("J. Smith" vs "J. Anderson" still scores low).
-            ratio = token_pair_cer(tru_tokens, ext_tokens)
+            ratio = token_pair_cer(tru_tokens, ext_tokens, truth_length_denominator=True)
             return ratio, "coll-cer", ("#d1e7dd" if ratio >= 0.85 else "#f8d7da"), ""
 
-    # Denominator is max(len(t), len(e)) so correct extra detail beyond a
-    # short truth value isn't penalized as if it were wrong.
     cer_t, cer_e = t_raw, e_raw
     if is_tax:
         # Author-citation punctuation/spacing is inconsistent across sources
@@ -272,7 +323,10 @@ def _baseline_accuracy(t_raw, e_raw, target, extraction, is_tax, is_coll, is_dat
         else:
             cer_t = re.sub(r"[^\w]", "", t_raw)
             cer_e = re.sub(r"[^\w]", "", e_raw)
-    cer = max(0.0, 1.0 - Levenshtein.distance(cer_t, cer_e) / max(len(cer_t), len(cer_e), 1))
+    # Real CER (truth length only) for taxonomy; max(len) elsewhere, so extra
+    # correct detail beyond a short truth value isn't penalized as if wrong.
+    denom = (len(cer_t) or 1) if is_tax else max(len(cer_t), len(cer_e), 1)
+    cer = max(0.0, 1.0 - Levenshtein.distance(cer_t, cer_e) / denom)
     note = ""
     if is_tax:
         # Name-similarity lookup only — doesn't verify `nearest` is a

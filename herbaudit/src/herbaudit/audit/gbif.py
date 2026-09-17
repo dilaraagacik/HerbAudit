@@ -196,9 +196,9 @@ def _gbif_match(name: str):
     authorship similarity to disambiguate homonyms (e.g. two different "Salix livida"
     published by different authors resolve to different, unrelated accepted names).
 
-    Returns a dict with status/canonical/usageKey/acceptedUsageKey, or None if GBIF
-    has no confident species-rank-or-below match (falls back to a bare genus match,
-    or nothing at all).
+    Returns a dict with status/canonical/usageKey/acceptedUsageKey/family, or None
+    if GBIF has no confident species-rank-or-below match (falls back to a bare
+    genus match, or nothing at all).
     """
     if not name or not name.strip():
         return None
@@ -227,6 +227,7 @@ def _gbif_match(name: str):
             "acceptedUsageKey": r.get("acceptedUsageKey"),
             "matchType":        r.get("matchType"),
             "rank":             r.get("rank"),
+            "family":           r.get("family"),
         }
 
     _GBIF_MATCH_CACHE[name] = result
