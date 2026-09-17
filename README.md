@@ -26,7 +26,7 @@ so digitization errors can be caught automatically instead of by hand.
 git clone git@github.com:dilaraagacik/HerbAudit.git
 cd HerbAudit
 
-python -m venv venv_herbaudit
+python3 -m venv venv_herbaudit
 source venv_herbaudit/bin/activate      # Windows: venv_herbaudit\Scripts\activate
 
 pip install -e ./herbaudit
