@@ -13,7 +13,7 @@ from herbaudit.pipeline.weights import _ensure_default_archival_weights
 try:
     import tomllib          # stdlib on Python 3.11+
 except ImportError:
-    import tomli as tomllib # backport for 3.8-3.10 (see requirements.txt)
+    import tomli as tomllib # backport for 3.8-3.10 (see pyproject.toml)
 
 # Load API keys from .env into os.environ (checks ./.env and ~/.herbaudit/.env;
 # never overrides a variable already exported in the shell).

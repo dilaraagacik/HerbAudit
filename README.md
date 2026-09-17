@@ -29,8 +29,7 @@ cd HerbAudit
 python -m venv venv_herbaudit
 source venv_herbaudit/bin/activate      # Windows: venv_herbaudit\Scripts\activate
 
-pip install -r requirements.txt
-pip install -e .
+pip install -e ./herbaudit
 ```
 
 Copy the example config and set an API key (only needed for Gemini/OpenAI —
@@ -39,7 +38,7 @@ skip this for a local Ollama model):
 ```bash
 mkdir -p ~/.herbaudit
 cp config.example.toml ~/.herbaudit/config.toml
-echo "GEMINI_API_KEY=your-key-here" >> .env
+echo "GEMINI_API_KEY=your-key-here" >> ~/.herbaudit/.env
 ```
 
 ## Model weights (label detector)
