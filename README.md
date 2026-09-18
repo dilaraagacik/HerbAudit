@@ -93,7 +93,7 @@ Common flags:
 
 ```bash
 herbaudit --input ./scans --model qwen2.5vl:7b --ollama-host http://localhost:11434
-herbaudit --input ./scans --model gemini-2.5-flash --no-reference   # skip GBIF lookup
+herbaudit --input ./scans --model gemini-2.5-flash --no-reference   # skip evaluation get transcription results only
 herbaudit --input ./scans --model gemini-2.5-flash --weights ./weights/my_detector.pt
 ```
 
