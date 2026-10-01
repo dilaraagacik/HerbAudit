@@ -36,9 +36,8 @@ echo "GEMINI_API_KEY=your-key-here" >> ~/.herbaudit/.env
 
 ## Model weights (label detector)
 
-The label/archival-region detector needs a trained `.pt` checkpoint.
-Checkpoints aren't distributed with the package — they're large binaries
-better shared as a download than as package data.
+The label/archival-region detector uses the LeafMachine2 `.pt` checkpoint.
+It isn't distributed with the package — it's a large binary, downloaded on first use.
 
 ### LeafMachine2/YOLOv5 backend (default) — `archival_detector_best.pt`
 
@@ -56,15 +55,8 @@ unzip -p /tmp/leafmachine2_release.zip release_v-2-1/acd/best.pt \
   > ~/.herbaudit/models/archival_detector_best.pt
 ```
 
-```bash
-herbaudit --input ./scans --model gemini-2.5-flash --weights ~/.herbaudit/models/archival_detector_best.pt
-```
-
-`resolve_weights_backend()` auto-detects which loader a given checkpoint
-needs (LeafMachine2/YOLOv5 vs. ultralytics YOLOv8/v11/v12/YOLO-World) — you
-don't need to tell it which one you're pointing at. Without `--weights`,
-HerbAudit falls back to plain OpenCV contour detection (no label-region
-model needed, lower accuracy on cluttered sheets).
+Use `--detector opencv` to skip the label-region model and use plain OpenCV
+contour detection (lower accuracy on cluttered sheets).
 
 ## Usage
 
@@ -85,7 +77,7 @@ Common flags:
 ```bash
 herbaudit --input ./scans --model qwen2.5vl:7b --ollama-host http://localhost:11434
 herbaudit --input ./scans --model gemini-2.5-flash --no-reference   # skip GBIF lookup
-herbaudit --input ./scans --model gemini-2.5-flash --weights ./weights/my_detector.pt
+herbaudit --input ./scans --model gemini-2.5-flash --detector opencv
 ```
 
 Run `herbaudit --help` for the full flag reference.

@@ -21,7 +21,7 @@ load_dotenv()
 load_dotenv(Path.home() / ".herbaudit" / ".env")
 
 # Auto-downloaded on first use if missing (see _ensure_default_archival_weights);
-# overridable via --weights or HERBAUDIT_WEIGHTS.
+# not user-overridable.
 DEFAULT_WEIGHTS = Path.home() / ".herbaudit" / "models" / "archival_detector_best.pt"
 
 # Auto-loaded if present; override with --config or HERBAUDIT_CONFIG.
@@ -134,8 +134,7 @@ def _print_help():
     row("--force", "", "Re-run every image even if ./herbaudit_output/<name>_audit.json already exists")
 
     section("Image processing")
-    row("--weights",  "PATH", "Label-region detector weights  any YOLO-family .pt checkpoint ")
-    row("--detector",       "",    "auto = use --weights if set (else OpenCV); opencv = force OpenCV contours",
+    row("--detector",       "",    "auto = LeafMachine2 detector; opencv = force OpenCV contours",
         choices=["auto", "opencv"],
         default="auto")
     row("--no-collage",     "",    "Skip label cropping — send full image to the LLM")
@@ -197,10 +196,6 @@ def main():
                              "different --model is auto-detected and re-run anyway, but "
                              "--no-collage changes aren't tracked, so switching "
                              "it without --force silently replays the old result.")
-    parser.add_argument("--weights",        default=None, metavar="PATH")
-    # Legacy aliases for --weights — not listed in _print_help() above.
-    parser.add_argument("--yolo-weights",   default=None)
-    parser.add_argument("--ultralytics-weights", default=None)
     parser.add_argument("--no-collage",     action="store_true", default=False)
     parser.add_argument("--detector",       default=None,
                         choices=["auto", "opencv"])
@@ -277,9 +272,8 @@ def main():
 
     gemini_key   = args.gemini_key or os.environ.get("GEMINI_API_KEY")
     openai_key   = args.openai_key or os.environ.get("OPENAI_API_KEY")
-    # resolve_weights_backend() figures out which checkpoint format this is, so
-    # nothing here needs to know. --yolo-weights/--ultralytics-weights are legacy
-    # aliases for --weights/HERBAUDIT_WEIGHTS.
+    # Detector weights are not user-configurable: the LeafMachine2 checkpoint is used
+    # (auto-downloaded on first use), or OpenCV with --detector opencv.
     def _auto_download_weights():
         # Skip if the user explicitly asked to skip the detector model (--detector opencv).
         if detector == "opencv":
@@ -288,12 +282,7 @@ def main():
         return str(path) if path else None
 
     weights = (
-        args.weights or args.yolo_weights or args.ultralytics_weights
-        or os.environ.get("HERBAUDIT_WEIGHTS")
-        or os.environ.get("HERBAUDIT_YOLO_WEIGHTS") or os.environ.get("HERBAUDIT_ULTRALYTICS_WEIGHTS")
-        or config.get("image", {}).get("weights")
-        or config.get("image", {}).get("yolo_weights") or config.get("image", {}).get("ultralytics_weights")
-        or (str(DEFAULT_WEIGHTS) if DEFAULT_WEIGHTS.exists() else None)
+        (str(DEFAULT_WEIGHTS) if DEFAULT_WEIGHTS.exists() else None)
         or _auto_download_weights()
     )
 

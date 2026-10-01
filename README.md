@@ -52,8 +52,7 @@ The label/archival-region detector needs a trained `.pt` checkpoint or you can s
 ### LeafMachine2/YOLOv5 backend (default) — `archival_detector_best.pt`
 
 **Downloads automatically the first time you run `herbaudit`** — no manual
-step needed. On first use, if no `--weights`/`HERBAUDIT_WEIGHTS`/config
-value points at a checkpoint, HerbAudit downloads LeafMachine2's own
+step needed. On first use, if the checkpoint isn't cached yet, HerbAudit downloads LeafMachine2's own
 official release (~1.4GB, one-time), extracts just the Archival Component
 Detector's checkpoint, and caches it at `~/.herbaudit/models/archival_detector_best.pt`
 
@@ -94,7 +93,7 @@ Common flags:
 ```bash
 herbaudit --input ./scans --model qwen2.5vl:7b --ollama-host http://localhost:11434
 herbaudit --input ./scans --model gemini-2.5-flash --no-reference   # skip evaluation get transcription results only
-herbaudit --input ./scans --model gemini-2.5-flash --weights ./weights/my_detector.pt
+herbaudit --input ./scans --model gemini-2.5-flash --detector opencv   # skip the YOLO detector
 ```
 
 Run `herbaudit --help` for the full flag reference.
