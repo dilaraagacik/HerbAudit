@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 260" role="img" aria-label="HerbAudit">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 260" role="img" aria-label="HerbAudit">
   <title>HerbAudit</title>
   <defs>
     <linearGradient id="leaf" x1="0" y1="0" x2="1" y2="1">
@@ -22,5 +22,5 @@
   <text x="270" y="152" font-family="'Panno Text','Roboto Condensed','Arial Narrow',Arial,sans-serif" font-size="112" font-weight="700" letter-spacing="-1">
     <tspan fill="#4cc38a">Herb</tspan><tspan fill="#136b4a">Audit</tspan>
   </text>
-  <text x="274" y="200" font-family="'Panno Text','Roboto Condensed','Arial Narrow',Arial,sans-serif" font-size="27" fill="#5b7080" letter-spacing=".5">Validating AI-Driven Herbarium Transcriptions</text>
+  <text x="274" y="204" font-family="'Panno Text','Roboto Condensed','Arial Narrow',Arial,sans-serif" font-size="33" fill="#5b7080" letter-spacing=".5">Validating AI-Driven Herbarium Transcriptions</text>
 </svg>
