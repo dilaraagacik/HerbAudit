@@ -1,4 +1,4 @@
-# HerbAudit
+<p align="center"><img src="assets/logo.svg" width="520" alt="HerbAudit"></p>
 
 An AI-powered audit tool for herbarium specimen digitization. HerbAudit takes
 photographed herbarium sheets, extracts the label data (collector, date,
