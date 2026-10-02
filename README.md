@@ -98,6 +98,50 @@ herbaudit --input ./scans --model gemini-2.5-flash --detector opencv   # skip th
 
 Run `herbaudit --help` for the full flag reference.
 
+## Reference data and annotations
+
+By default each specimen is checked against its GBIF record, matched by the
+image filename (without extension). `--input` can also be a CSV or Excel file
+of existing transcriptions, which are evaluated as they are, without a new
+transcription step.
+
+GBIF is not always complete or correct, so you can add your own information in
+one JSON file. Pass it with `--annotations` (a packaged file is used if you
+omit it; `--annotations ""` turns it off). Each key is an image filename
+without extension, and each entry has two optional parts for two situations:
+
+- **The specimen is not on GBIF: give `fields`**, the correct values
+  (`scientificName`, `genus`, `specificEpithet`, `recordedBy`, `eventDate`,
+  `catalogNumber`, `country`, `stateProvince`, `locality`, `decimalLatitude`,
+  `decimalLongitude`). The AI is scored against them instead of the specimen
+  being skipped.
+- **The specimen is on GBIF but a value may be wrong: give `transcription`**,
+  the label text as printed. When the AI and the reference disagree on a field,
+  HerbAudit looks for each value in this text, and the value found on the label
+  becomes the reference. If neither is found, the reference stays as it was.
+
+```json
+{
+  "GENT10099346": {
+    "fields": {
+      "scientificName": "Anonidium mannii (Oliv.) Engl. & Diels",
+      "recordedBy": "Léonard, J.",
+      "eventDate": "1946-08-29",
+      "country": "Democratic Republic of the Congo",
+      "locality": "Km 26, route Bikoro"
+    }
+  },
+  "1839047232": {
+    "transcription": "No 509. ex musei herbario parisiensis Nicolasia Quinqueseta O. Hoffm. ex. Thell. ... Dinter 509. Gr. Barmen, 1300 m Namibie 15 mai 1907 ..."
+  }
+}
+```
+
+The first specimen is not on GBIF, so its values come from `fields`. The second
+is on GBIF, and its label text settles any disagreement.
+
+You are responsible for checking that the reference is correct.
+
 ## Citation
 
 HerbAudit's default label detector is the Archival Component Detector from
