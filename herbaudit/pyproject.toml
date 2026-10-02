@@ -43,6 +43,7 @@ dependencies = [
     "seaborn",
     "PyYAML",
     "Pillow",
+    "cryptography>=42",
 ]
 
 [project.optional-dependencies]
@@ -55,5 +56,5 @@ herbaudit = "herbaudit.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-"herbaudit.audit" = ["wfo_intermediate.pem", "files/*.json"]
+"herbaudit.audit" = ["files/*.json"]
 "herbaudit.vendor.leafmachine2_detector" = ["LICENSE", "NOTICE.md"]

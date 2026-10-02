@@ -21,36 +21,72 @@ _WFO_HEADERS = {
     "User-Agent": "HerbAudit/1.0 (herbarium specimen evaluation)"
 }
 
-# list.worldfloraonline.org's server never sends its intermediate
-# certificate, so plain TLS verification fails with "unable to get local
-# issuer certificate". Fix: pin the missing intermediate ourselves
-# (wfo_intermediate.pem, a public CA cert, safe to commit) on top of
-# certifi's normal root bundle.
-#
-# If this starts failing again (WFO rotates issuers), re-pin from the leaf
-# cert's AIA "CA Issuers" URL:
-#   openssl s_client -connect list.worldfloraonline.org:443 \
-#       -servername list.worldfloraonline.org -showcerts
-_WFO_INTERMEDIATE_CERT_FILE = Path(__file__).parent / "wfo_intermediate.pem"
+# WFO's server doesn't send its intermediate certificate, so we download it
+# ourselves and add it to certifi's roots.
+_WFO_HOST = "list.worldfloraonline.org"
 
 
 _WFO_CA_BUNDLE_FILE = Path.home() / ".herbaudit" / "wfo_ca_bundle.pem"
 _wfo_ca_bundle_path: str | None = None
 
 
-def _wfo_ca_bundle() -> str:
-    """Build (once, cached to disk) a CA bundle = certifi roots + WFO's missing intermediate."""
+def _fetch_wfo_intermediate() -> str:
+    """Download WFO's intermediate cert, only trusting it if it chains to a certifi root."""
+    import ssl
+    import certifi
+    from cryptography import x509
+    from cryptography.hazmat.primitives.serialization import Encoding
+    from cryptography.x509.oid import AuthorityInformationAccessOID
+
+    leaf = x509.load_pem_x509_certificate(
+        ssl.get_server_certificate((_WFO_HOST, 443)).encode())
+    aia = leaf.extensions.get_extension_for_class(x509.AuthorityInformationAccess).value
+    urls = [d.access_location.value for d in aia
+            if d.access_method == AuthorityInformationAccessOID.CA_ISSUERS]
+    if not urls:
+        raise RuntimeError("WFO leaf certificate has no CA Issuers URL")
+
+    data = requests.get(urls[0], headers=_WFO_HEADERS, timeout=10).content
+    try:
+        inter = x509.load_der_x509_certificate(data)
+    except ValueError:
+        inter = x509.load_pem_x509_certificate(data)
+
+    leaf.verify_directly_issued_by(inter)
+    roots = x509.load_pem_x509_certificates(Path(certifi.where()).read_bytes())
+    for root in roots:
+        if root.subject == inter.issuer:
+            try:
+                inter.verify_directly_issued_by(root)
+                return inter.public_bytes(Encoding.PEM).decode()
+            except Exception:
+                continue
+    raise RuntimeError("downloaded WFO intermediate does not chain to a trusted root")
+
+
+def _wfo_ca_bundle(rebuild: bool = False) -> str:
+    """Return the CA bundle path (certifi roots + WFO intermediate), built once and cached."""
     global _wfo_ca_bundle_path
-    if _wfo_ca_bundle_path is not None:
+    if _wfo_ca_bundle_path is not None and not rebuild:
         return _wfo_ca_bundle_path
     import certifi
-    if not _WFO_CA_BUNDLE_FILE.exists():
+    if rebuild or not _WFO_CA_BUNDLE_FILE.exists():
+        intermediate = _fetch_wfo_intermediate()
         _WFO_CA_BUNDLE_FILE.parent.mkdir(parents=True, exist_ok=True)
         roots = Path(certifi.where()).read_text(encoding="utf-8")
-        intermediate = _WFO_INTERMEDIATE_CERT_FILE.read_text(encoding="utf-8")
         _WFO_CA_BUNDLE_FILE.write_text(roots + "\n" + intermediate, encoding="utf-8")
     _wfo_ca_bundle_path = str(_WFO_CA_BUNDLE_FILE)
     return _wfo_ca_bundle_path
+
+
+def _wfo_get(params: dict) -> dict:
+    """Query WFO, rebuilding the CA bundle and retrying once on a TLS error."""
+    url = f"https://{_WFO_HOST}/matching_rest.php"
+    kw = dict(params=params, headers=_WFO_HEADERS, timeout=10)
+    try:
+        return requests.get(url, verify=_wfo_ca_bundle(), **kw).json()
+    except requests.exceptions.SSLError:
+        return requests.get(url, verify=_wfo_ca_bundle(rebuild=True), **kw).json()
 
 
 def _load_wfo_cache():
@@ -122,11 +158,7 @@ def _wfo_resolve(name: str, authorship: str = "", allow_fuzzy: bool = True):
         return None, None, False
 
     try:
-        r = requests.get(
-            "https://list.worldfloraonline.org/matching_rest.php",
-            params={"input_string": query},
-            headers=_WFO_HEADERS, timeout=10, verify=_wfo_ca_bundle(),
-        ).json()
+        r = _wfo_get({"input_string": query})
 
         if r.get("error"):
             return _cache_fail()
@@ -166,8 +198,9 @@ def _wfo_resolve(name: str, authorship: str = "", allow_fuzzy: bool = True):
         return result
 
     except Exception as exc:
+        # A failed request isn't an answer, so don't cache it.
         print(f"  WFO lookup error for '{clean}': {exc}")
-        return _cache_fail()
+        return None, None, False
 
 
 _WFO_LOOKUP_CACHE: dict = {}   # clean binomial → (found, hierarchy, closest_name, closest_similarity)
@@ -207,11 +240,7 @@ def _wfo_lookup(name: str, authorship: str = ""):
         return result
 
     try:
-        r = requests.get(
-            "https://list.worldfloraonline.org/matching_rest.php",
-            params={"input_string": query},
-            headers=_WFO_HEADERS, timeout=10, verify=_wfo_ca_bundle(),
-        ).json()
+        r = _wfo_get({"input_string": query})
 
         if r.get("error"):
             return _cache((False, None, None, None))
@@ -370,7 +399,9 @@ def _wfo_checklistbank_match(name: str):
                 if status and query_words <= matched_words:
                     result = {"status": status, "accepted": accepted_name}
         except Exception as exc:
+            # A failed request isn't an answer, so don't cache it.
             print(f"  WFO (Checklistbank) lookup error for '{query}': {exc}")
+            continue
 
         _WFO_CB_CACHE[cache_key] = result
         if result is not None:
@@ -434,11 +465,7 @@ def _nearest_taxon(name: str):
 
     result = (None, None, 0.0)
     try:
-        r = requests.get(
-            "https://list.worldfloraonline.org/matching_rest.php",
-            params={"input_string": clean},
-            headers=_WFO_HEADERS, timeout=10, verify=_wfo_ca_bundle(),
-        ).json()
+        r = _wfo_get({"input_string": clean})
         cands = list(r.get("candidates") or [])
         if r.get("match"):
             cands.append(r["match"])
