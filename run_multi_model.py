@@ -112,15 +112,51 @@ def pareto(points):
     return out
 
 
-def plot(summary, out_dir, font="Panno Text"):
+def _monotone_curve(xs, ys, n=300):
+    """Smooth monotone-cubic (PCHIP-style) curve through increasing points."""
+    import numpy as np
+    x, y = np.asarray(xs, float), np.asarray(ys, float)
+    if len(x) < 3:
+        t = np.linspace(x[0], x[-1], n)
+        return t, np.interp(t, x, y)
+    h, d = np.diff(x), np.diff(y) / np.diff(x)
+    m = np.zeros_like(y)
+    for k in range(1, len(x) - 1):
+        if d[k - 1] * d[k] > 0:
+            w1, w2 = 2 * h[k] + h[k - 1], h[k] + 2 * h[k - 1]
+            m[k] = (w1 + w2) / (w1 / d[k - 1] + w2 / d[k])
+
+    def end(h0, h1, d0, d1):
+        s = ((2 * h0 + h1) * d0 - h0 * d1) / (h0 + h1)
+        if s * d0 <= 0:
+            return 0.0
+        if d0 * d1 <= 0 and abs(s) > 3 * abs(d0):
+            return 3 * d0
+        return s
+    m[0], m[-1] = end(h[0], h[1], d[0], d[1]), end(h[-1], h[-2], d[-1], d[-2])
+    t = np.linspace(x[0], x[-1], n)
+    i = np.clip(np.searchsorted(x, t, side="right") - 1, 0, len(x) - 2)
+    s = (t - x[i]) / h[i]
+    h00, h10 = 2 * s**3 - 3 * s**2 + 1, s**3 - 2 * s**2 + s
+    h01, h11 = -2 * s**3 + 3 * s**2, s**3 - s**2
+    return t, h00 * y[i] + h10 * h[i] * m[i] + h01 * y[i + 1] + h11 * h[i] * m[i + 1]
+
+
+def plot(summary, out_dir, font="UGent Panno Text"):
+    import numpy as np
     import matplotlib.pyplot as plt
     from matplotlib import font_manager as fm
+    import logging
+    logging.getLogger("matplotlib.font_manager").setLevel(logging.ERROR)
+    from matplotlib.transforms import Bbox
+    for ttf in (Path.home() / ".fonts").glob("UGentPannoText*.ttf"):
+        fm.fontManager.addfont(str(ttf))
     installed = {f.name for f in fm.fontManager.ttflist}
-    use = [f for f in [font, "Panno", "Roboto Condensed", "Ubuntu Condensed", "Arial Narrow", "DejaVu Sans"]
-           if f in installed]
+    use = [f for f in [font, "UGent Panno Text", "Panno Text", "Roboto Condensed", "Ubuntu Condensed",
+                       "Arial Narrow", "DejaVu Sans"] if f in installed]
     if font not in installed:
         print(f"NOTE: font '{font}' not installed, using '{use[0]}'. Install it or pass --font.")
-    plt.rcParams.update({"font.family": use, "font.size": 12, "text.color": "#0f2f3f",
+    plt.rcParams.update({"font.family": use, "font.size": 14, "text.color": "#0f2f3f",
                          "axes.labelcolor": "#0f2f3f", "xtick.color": "#555", "ytick.color": "#555",
                          "axes.edgecolor": "#bbb"})
     # (marker, marker colour, size, label colour)
@@ -137,28 +173,86 @@ def plot(summary, out_dir, font="Panno Text"):
         fig, ax = plt.subplots(figsize=(11, 6))
         front = pareto(list(zip(d_all[xcol], d_all["accuracy"])))
         xmax = d_all[xcol].max() * 1.18 or 1
-        fx = [p[0] for p in front] + [xmax]
-        fy = [p[1] for p in front] + [front[-1][1]]
-        ax.step(fx, fy, where="post", ls="--", color="#5a6b85", lw=1.8, label="Efficiency frontier")
-        ax.fill_between(fx, fy, 100, step="post", color="#eef1f6", alpha=1, zorder=0)
+        ymin, ymax = max(0, d_all["accuracy"].min() - 2.2), 100
+        ax.set_xlim(left=-xmax * .01, right=xmax)
+        ax.set_ylim(ymin, ymax)
+
+        # Efficiency frontier: vertical from the axis up to the cheapest frontier point,
+        # a smooth monotone curve through the frontier, then flat to the right edge.
+        cx, cy = _monotone_curve([p[0] for p in front], [p[1] for p in front])
+        cx, cy = np.r_[cx, xmax], np.r_[cy, front[-1][1]]
+        ax.fill_between(cx, cy, ymax, color="#eef1f6", alpha=1, zorder=0)
+        line, = ax.plot(np.r_[front[0][0], cx], np.r_[ymin, cy], ls="--", color="#5a6b85", lw=1.8,
+                        label="Efficiency frontier", zorder=1)
+
+        handles = []
         for prov, (mk, col, sz, _) in style.items():
             d = d_all[d_all["provider"] == prov]
             if len(d):
-                ax.scatter(d[xcol], d["accuracy"], marker=mk, c=col, s=sz, edgecolor="white",
-                           label=names[prov], zorder=3)
-        for _, r in d_all.iterrows():
-            ax.annotate(r["model"], (r[xcol], r["accuracy"]), xytext=(8, 8), textcoords="offset points",
-                        fontsize=11, color=style[r["provider"]][3], weight="bold")
-        ax.set_xlabel(xlabel, fontsize=14, weight="bold"); ax.set_ylabel("HerbAudit Accuracy (%)", fontsize=14, weight="bold")
-        ax.set_xlim(left=-xmax * .01, right=xmax)
-        ax.set_ylim(max(0, d_all["accuracy"].min() - 3), min(100, d_all["accuracy"].max() + 3))
+                handles.append(ax.scatter(d[xcol], d["accuracy"], marker=mk, c=col, s=sz,
+                                          edgecolor="white", label=names[prov], zorder=3))
+        handles.append(line)
+
+        ax.set_xlabel(xlabel, fontsize=17, weight="semibold")
+        ax.set_ylabel("HerbAudit Accuracy (%)", fontsize=17, weight="semibold")
+        ax.tick_params(labelsize=14)
         if dollar:
             ax.xaxis.set_major_formatter(lambda v, _: f"${v:g}")
-        ax.grid(alpha=.25); ax.set_title(title, loc="left", color="#888", fontsize=13)
+        ax.grid(alpha=.25)
         for s in ("top", "right"):
             ax.spines[s].set_visible(False)
-        ax.legend(loc="lower right", ncol=2, frameon=True)
-        fig.tight_layout(); fig.savefig(out_dir / fname, dpi=200); plt.close(fig)
+        ax.set_title(title, loc="left", color="#888", fontsize=16, y=1.17, pad=0)
+        ax.legend(handles=handles, loc="center", bbox_to_anchor=(0.5, 1.045), ncol=len(handles),
+                  frameon=True, fancybox=True, framealpha=1, edgecolor="#d9dee6", fontsize=16,
+                  borderpad=.7, columnspacing=2.2, handletextpad=.6)
+        fig.tight_layout()
+
+        # Model labels: try several spots around each point and keep the one that
+        # overlaps the fewest other labels, markers or the plot edge.
+        fig.canvas.draw()
+        r = fig.canvas.get_renderer()
+        px = ax.transData.transform(np.c_[d_all[xcol], d_all["accuracy"]])
+        mk_boxes = [Bbox.from_extents(x - 16, y - 16, x + 16, y + 16) for x, y in px]
+        axbox, placed = ax.get_window_extent(r), []
+        spots = [(10, 8, "left", "bottom"), (10, -8, "left", "top"),
+                 (-10, 8, "right", "bottom"), (-10, -8, "right", "top"),
+                 (12, 0, "left", "center"), (-12, 0, "right", "center"),
+                 (0, 16, "center", "bottom"), (0, -16, "center", "top"),
+                 (14, 26, "left", "bottom"), (14, -26, "left", "top"),
+                 (-14, 26, "right", "bottom"), (-14, -26, "right", "top")]
+
+        def _area(a_, b_):
+            w = min(a_.x1, b_.x1) - max(a_.x0, b_.x0)
+            h = min(a_.y1, b_.y1) - max(a_.y0, b_.y0)
+            return w * h if w > 0 and h > 0 else 0.0
+
+        for _, row in d_all.sort_values("accuracy", ascending=False).iterrows():
+            i = list(d_all.index).index(row.name)
+            best_cost, best_spot = None, None
+            for spot in spots:
+                dx, dy, ha, va = spot
+                t = ax.annotate(row["model"], (row[xcol], row["accuracy"]), xytext=(dx, dy),
+                                textcoords="offset points", ha=ha, va=va, fontsize=14,
+                                color=style[row["provider"]][3], weight="semibold", zorder=4)
+                bb = t.get_window_extent(r).expanded(1.04, 1.12)
+                t.remove()
+                cost = sum(_area(bb, p_) for p_ in placed)
+                cost += sum(_area(bb, m_) for j, m_ in enumerate(mk_boxes) if j != i)
+                if not (axbox.x0 <= bb.x0 and bb.x1 <= axbox.x1 and axbox.y0 <= bb.y0 and bb.y1 <= axbox.y1):
+                    cost += 1e6
+                if best_cost is None or cost < best_cost:
+                    best_cost, best_spot, best_bb = cost, spot, bb
+                if cost == 0:
+                    break
+            dx, dy, ha, va = best_spot
+            far = max(abs(dx), abs(dy)) > 16   # label pushed away from its point: add a leader line
+            ax.annotate(row["model"], (row[xcol], row["accuracy"]), xytext=(dx, dy),
+                        textcoords="offset points", ha=ha, va=va, fontsize=14,
+                        color=style[row["provider"]][3], weight="semibold", zorder=4,
+                        arrowprops=dict(arrowstyle="-", color="#9aa5b5", lw=.9, shrinkA=2, shrinkB=7) if far else None)
+            placed.append(best_bb)
+        fig.savefig(out_dir / fname, dpi=200)
+        plt.close(fig)
 
     n = len(summary)
     draw("cost_per_1000", "Cost per 1000 specimens ($)",
@@ -183,7 +277,7 @@ def main():
     p.add_argument("--out", default="results", help="Where summary.csv and plots go")
     p.add_argument("--force", action="store_true", help="Re-run every image (fresh timings)")
     p.add_argument("--skip-run", action="store_true", help="Don't call herbaudit; only re-collect and re-plot")
-    p.add_argument("--font", default="Panno Text", help="Plot font (UGent house font; must be installed)")
+    p.add_argument("--font", default="UGent Panno Text", help="Plot font (UGent house font; must be installed)")
     a = p.parse_args()
 
     a.input = fix_path(a.input)
