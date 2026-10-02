@@ -97,7 +97,7 @@ def token_pair_cer(tru_tokens: list[str], ext_tokens: list[str],
 
 def get_accuracy(target, extraction, is_tax=False, is_coll=False,
                  is_date=False, is_geo=False, gbif_meta=None, manual_text=None,
-                 is_epithet=False):
+                 is_epithet=False, strict_geo=False):
     e_raw = clean_text(extraction)
     t_raw = clean_text(target)
 
@@ -119,7 +119,7 @@ def get_accuracy(target, extraction, is_tax=False, is_coll=False,
 
     score, method, color, note = _baseline_accuracy(
         t_raw, e_raw, target, extraction, is_tax, is_coll, is_date, is_geo, gbif_meta,
-        is_epithet=is_epithet)
+        is_epithet=is_epithet, strict_geo=strict_geo)
 
     # A mismatch might be GBIF's fault, not the AI's — when a manual sheet
     # transcription is available and the score above found a real mismatch
@@ -137,7 +137,7 @@ def get_accuracy(target, extraction, is_tax=False, is_coll=False,
 
 
 def _baseline_accuracy(t_raw, e_raw, target, extraction, is_tax, is_coll, is_date, is_geo, gbif_meta,
-                        is_epithet=False):
+                        is_epithet=False, strict_geo=False):
     """Field-specific baseline scoring, consulted before any manual-text override."""
     if is_geo:
         def _geo_score():
@@ -197,8 +197,11 @@ def _baseline_accuracy(t_raw, e_raw, target, extraction, is_tax, is_coll, is_dat
             # punctuate the same content differently (comma vs. dash).
             t_words = normalize_for_similarity(t_raw).split()
             e_words = normalize_for_similarity(e_raw).split()
-            # Truth locality often has GBIF-added detail no label could show.
-            ratio = token_pair_cer(t_words, e_words, penalize_truth_unmatched=False)
+            # GBIF locality often has detail no label could show, so unmatched truth
+            # words are free; a manual annotation comes from the label, so strict_geo
+            # scores real CER against the truth length instead.
+            ratio = token_pair_cer(t_words, e_words, penalize_truth_unmatched=False,
+                                   truth_length_denominator=strict_geo)
 
             return ratio, "geo-cer-bag", ("#d1e7dd" if ratio >= 0.70 else "#f8d7da"), ""
 

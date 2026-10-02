@@ -85,11 +85,11 @@ BADGE_TOOLTIPS = {
     "Taxon-Match":   "Exact binomial match — genus + specific epithet identical after stripping authors",
     "token-match":   "Collector token match — any shared surname or initial between AI and GBIF = 100%",
     "date-eval":     "Precision-aware date scoring — year match = 50%, year+month = 75-100%, full date = 100%",
-    "cer":           "Character Error Rate — 1 - (Levenshtein distance / longer string's length). Score = similarity %",
-    "coll-cer":      "Collector name similarity — no shared surname/initial token, so compared with difflib's sequence-matching ratio (tolerant of reordering, e.g. \"Smith, J.\" vs \"J. Smith\") instead of a raw character diff",
+    "cer":           "Character Error Rate — 1 - (Levenshtein distance / reference length). Score = similarity %",
+    "coll-cer":      "Collector name CER — words paired by best match (tolerant of reordering, e.g. \"Smith, J.\" vs \"J. Smith\"), edits divided by the reference length; a matching initial is free",
     "cer-manual-text": "GBIF/AI mismatch resolved against the actual label transcription (Label Studio) — exact whole-word match only, decide which side (or neither) the sheet backs, then CER against that reference",
     "geo-hdx-match": "ISO country code match — standardised via HDX country database",
-    "geo-cer-bag":   "Location similarity — difflib's sequence-matching ratio over normalized text, tolerant of word reordering and partial phrase overlap",
+    "geo-cer-bag":   "Location similarity — words paired by best match, tolerant of reordering; reference words with no match are not penalized (GBIF truth). Against a manual annotation, CER divided by the reference length",
     "coord-eval":    "Haversine distance — <1 km=100%, <10 km=90%, <50 km=30%, <100 km=10%, ≥100 km=0%",
     "N/A":           "GBIF truth itself has no value for this field — not evaluable, excluded from the average",
     "missing":       "GBIF truth is available but the AI did not extract this field — scored 0%, counted against the average",
@@ -181,10 +181,12 @@ COL_MAP = {
 }
 
 
-def build_card(fname, gid, truth_row, ai_row, field_map, images_folder=None, manual_text=None):
+def build_card(fname, gid, truth_row, ai_row, field_map, images_folder=None, manual_text=None,
+               strict_geo=False):
     """Build an HTML audit card for one specimen.
     manual_text: sheet transcription, used only to resolve an eventDate
     mismatch that might be GBIF's fault (see get_accuracy).
+    strict_geo: score geography as CER against the truth length (manual annotations).
     Returns (avg_score, html, has_image, field_results)."""
     gbif_url        = f"https://www.gbif.org/occurrence/{gid}"
     label           = display_name(fname, gid)
@@ -240,7 +242,7 @@ def build_card(fname, gid, truth_row, ai_row, field_map, images_folder=None, man
                 acc, method, color, note = get_accuracy(
                     g_val, v_val, is_tax, is_coll, is_date, is_geo,
                     gbif_meta=truth_row, manual_text=manual_text,
-                    is_epithet=(vv_col == "specificEpithet")
+                    is_epithet=(vv_col == "specificEpithet"), strict_geo=strict_geo
                 )
 
             if vv_col == "scientificName" and method == EXCLUDED_SENTINEL:

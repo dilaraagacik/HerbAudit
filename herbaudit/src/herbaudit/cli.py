@@ -125,10 +125,10 @@ def _print_help():
 
     section("Report")
     row("--no-reference", "", "Skip GBIF lookup — standalone extraction report with WFO check")
-    row("--annotations", "PATH", "Manual ground-truth JSON for specimens with no GBIF-published "
-        "occurrence — scored against this instead of skipped as unmatched. See "
-        "herbaudit/files/manual_annotations.json for the format",
-        default="herbaudit/files/manual_annotations.json")
+    row("--annotations", "PATH", "Annotations JSON, per specimen: \"fields\" = ground truth for specimens "
+        "with no GBIF record; \"transcription\" = label text, so that when the AI and GBIF disagree "
+        "the value found on the label becomes the reference. See herbaudit/files/annotations.json",
+        default="herbaudit/files/annotations.json")
     # TODO: --ocr row hidden until herbaudit.ocr_evaluator is ported into this package.
     row("--output", "NAME", "Label this run's output files")
     row("--force", "", "Re-run every image even if ./herbaudit_output/<name>_audit.json already exists")
@@ -175,10 +175,11 @@ def main():
     parser.add_argument("--ollama-host",    default=None)
     parser.add_argument("--no-reference",   action="store_true", default=False)
     parser.add_argument("--annotations",    default=None, metavar="PATH",
-                        help="Manual ground-truth JSON for specimens with no GBIF-published "
-                             "occurrence (see herbaudit/files/manual_annotations.json for the "
-                             "format). Left off: uses that packaged file automatically, regardless "
-                             "of cwd. Pass \"\" to disable the fallback entirely.")
+                        help="Annotations JSON: per specimen, \"fields\" (ground truth for specimens "
+                             "with no GBIF record) and/or \"transcription\" (label text, used to "
+                             "settle AI/GBIF disagreements); see "
+                             "herbaudit/files/annotations.json for the format. Left off: uses that "
+                             "packaged file, regardless of cwd. Pass \"\" to disable.")
     # TODO: --ocr mode hidden until herbaudit.ocr_evaluator is ported.
     # parser.add_argument("--ocr",            default=None, metavar="GT_PATH")
     # parser.add_argument("--iou-threshold",  type=float, default=0.5)
@@ -330,8 +331,6 @@ def main():
         batch          = batch,
         force          = args.force,
         annotations_path = args.annotations,
-        # manual_transcriptions_path left unset — run_audit() auto-discovers the
-        # packaged label_studio_annotations.json and uses it when a specimen matches.
     )
 
     elapsed    = time.perf_counter() - t_start

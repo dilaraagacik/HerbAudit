@@ -13,64 +13,25 @@ Public entry points:
     resolve_date_mismatch(gbif_date, ai_date, manual_text) -> dict | None
 """
 import calendar
-import json
 import re
 
 from herbaudit.audit import dates as _herbaudit_core
 from herbaudit.audit.dates import date_accuracy, _parse_date_components
+from herbaudit.audit.manual_ground_truth import load_annotation_entries
 
 if _herbaudit_core.dateutil_parser is None:
     from dateutil import parser as _dateutil_parser
     _herbaudit_core.dateutil_parser = _dateutil_parser
 
 
-# _TASK_ID_RE/_KNOWN_UUID_TO_GBIF are no longer used by load_manual_transcriptions
-# below (that now reads an already-resolved flat file) — kept because the outer
-# repo's compare_gbif_ai_labelstudio.py still imports both directly to match a raw
-# Label Studio export's file_upload name back to a specimen id.
-
-_TASK_ID_RE = re.compile(r"^[0-9a-f]{8}-([A-Za-z0-9]+)\.(jpe?g|png)$", re.IGNORECASE)
-
-# Tasks uploaded before the GBIF-id-as-filename convention keep only a bare UUID
-# as their storage name, so _TASK_ID_RE can't recover a gbif id from it. These 19
-# were resolved out-of-band against the original project records.
-_KNOWN_UUID_TO_GBIF = {
-    "3a61e8ae-6cc6-491f-b2d2-b1849c9b7c10": "1839047232",
-    "4fd24806-3be8-4e6e-9858-a7d27edd5c40": "144846765",
-    "5c4e57ec-c095-4ffc-a5f3-71fdcf4088dc": "1839025366",
-    "02c02000-22f3-44b0-b82b-4851a4b65c66": "912210297",
-    "ed604a3e-13e4-497b-a675-1c20a8182743": "912112501",
-    "7fbbbe01-a607-4095-830a-c7b923e7b3a5": "3439700361",
-    "f8d7c045-cc61-49b1-9af9-9da04e969887": "3439700663",
-    "0ea936be-b48c-478a-9f49-c274cf07fcd7": "1839475650",
-    "1582389c-972a-4511-8e91-08a8cedecf92": "1839388956",
-    "2aa3a0ad-0f83-45fe-94ea-e37c049bcb0b": "1839473743",
-    "8ed5f374-e39a-4eca-abad-f297eefa1af3": "1839483117",
-    "7cb09174-f9cf-4099-9efb-d8c5b481c8c0": "1839433548",
-    "3ff1b0da-07d9-40ae-bbab-a5adb55d893a": "437628341",
-    "8bb4fc84-638e-4326-8cad-ae6a4ea2b2dc": "437624039",
-    "1c8b62e9-c97e-4a31-b363-27614fadb8ce": "1055620397",
-    "7ea4d3be-5900-472e-8ad6-ec12afd5fd29": "1057587092",
-    "0c6f4a4a-54f1-488e-83c7-694929e29119": "575038239",
-    "2fc4d714-981a-4428-8640-3afcc0ce474e": "773979195",
-    "951252c7-7ed4-4cb7-9d49-297e9c9c58ea": "3016513678",
-}
-
-
 def load_manual_transcriptions(annotations_path: str) -> dict[str, str]:
-    """{gbif_id: full transcribed text}.
-
-    annotations_path points at a flat {specimen_id: transcription_text} JSON
-    file — reading order already resolved and hand corrections already merged
-    in (see herbaudit/audit/files/label_studio_annotations.json).
+    """{specimen_id: transcribed label text}, from the "transcription" part of each
+    entry in the annotations file (see herbaudit/audit/files/annotations.json).
 
     Returns {} if annotations_path is falsy or the file doesn't exist."""
-    import os
-    if not annotations_path or not os.path.isfile(annotations_path):
-        return {}
-    with open(annotations_path, encoding="utf-8") as f:
-        data = json.load(f)
-    return {k: v for k, v in data.items() if isinstance(v, str) and v}
+    entries = load_annotation_entries(annotations_path)
+    return {k: v["transcription"] for k, v in entries.items()
+            if isinstance(v.get("transcription"), str) and v["transcription"]}
 
 # Month names the extractor recognizes on herbarium labels — European sheets
 # commonly write the month as a Roman numeral (e.g. "24.IX.1968") or spell it

@@ -32,7 +32,6 @@ from .run import (
     OUTPUT_HTML,
     OUTPUT_XLSX,
     DEFAULT_ANNOTATIONS_PATH,
-    DEFAULT_TRANSCRIPTIONS_PATH,
     run_audit,
 )
 
@@ -66,6 +65,5 @@ __all__ = [
     "OUTPUT_HTML",
     "OUTPUT_XLSX",
     "DEFAULT_ANNOTATIONS_PATH",
-    "DEFAULT_TRANSCRIPTIONS_PATH",
     "run_audit",
 ]

@@ -41,8 +41,7 @@ OUTPUT_XLSX       = "results.xlsx"
 
 # Anchored to __file__ (not a relative path) so it resolves correctly
 # regardless of the cwd `herbaudit` is invoked from.
-DEFAULT_ANNOTATIONS_PATH = str(Path(__file__).parent / "files" / "manual_annotations.json")
-DEFAULT_TRANSCRIPTIONS_PATH = str(Path(__file__).parent / "files" / "label_studio_annotations.json")
+DEFAULT_ANNOTATIONS_PATH = str(Path(__file__).parent / "files" / "annotations.json")
 
 
 def _run_no_reference(vv_df: "pd.DataFrame", gemini_model: str, images_folder=None, output_tag=None):
@@ -294,21 +293,19 @@ def run_audit(input_path=None, images_folder=None, truth_path=None,
               output_tag=None, force=False,
               batch=False, batch_chunk_mb=1000, batch_submit_workers=5,
               batch_poll_interval=30.0,
-              annotations_path=None, manual_transcriptions_path=None):
+              annotations_path=None):
     """
     Run the full GBIF-comparison audit (or the --no_reference report when
     `noreference` is set) and write the HTML/Excel results.
 
     output_tag: appended to output filenames so separate runs don't overwrite
     each other.
-    annotations_path / manual_transcriptions_path: manual ground-truth /
-    transcription fallbacks used when GBIF has no matching occurrence or a
-    suspect eventDate; default to the packaged files, pass "" to disable.
+    annotations_path: JSON with per-specimen ground-truth "fields" (used when GBIF
+    has no matching occurrence) and label "transcription" text (used to settle
+    AI/GBIF disagreements); defaults to the packaged file, pass "" to disable.
     """
     if annotations_path is None:
         annotations_path = DEFAULT_ANNOTATIONS_PATH
-    if manual_transcriptions_path is None:
-        manual_transcriptions_path = DEFAULT_TRANSCRIPTIONS_PATH
     _lazy_imports()
     if not input_path:
         raise ValueError("Provide an input_path (CSV, Excel, or image folder).")
@@ -439,12 +436,11 @@ def run_audit(input_path=None, images_folder=None, truth_path=None,
         print(f"  Manual annotations loaded: {len(manual_annotations)} "
               f"entr{'y' if len(manual_annotations) == 1 else 'ies'} from {annotations_path}")
 
-    # Sheet transcriptions (see manual_transcriptions_path docstring above); {} if not given.
     from herbaudit.manual_date_reconcile import load_manual_transcriptions
-    manual_transcriptions = load_manual_transcriptions(manual_transcriptions_path)
+    manual_transcriptions = load_manual_transcriptions(annotations_path)
     if manual_transcriptions:
         print(f"  Manual transcriptions loaded: {len(manual_transcriptions)} "
-              f"specimen(s) from {manual_transcriptions_path}")
+              f"specimen(s) from {annotations_path}")
 
     field_map = {
         "Taxonomy": {
@@ -501,7 +497,7 @@ def run_audit(input_path=None, images_folder=None, truth_path=None,
             truth_row = _truth_row_from_annotation(annotation)
             avg, card_html, has_image, field_results = build_card(
                 pure_id, gid, truth_row, ai_row, field_map, images_folder=images_folder,
-                manual_text=manual_text
+                manual_text=manual_text, strict_geo=True
             )
             print(f"  MATCHED {pure_id}  ({fmt_pct(avg)}, vs. manual annotation)")
             _persist_gbif_accuracy(pure_id, avg)

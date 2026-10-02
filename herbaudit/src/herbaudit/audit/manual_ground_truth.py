@@ -1,6 +1,6 @@
 """
-Manual (human-supplied) ground-truth annotation loading — GBIF fallback for
-specimens with no published GBIF occurrence.
+Loading of the human-supplied annotations file: ground-truth fields (GBIF fallback
+for specimens with no published occurrence) and sheet transcriptions.
 """
 from __future__ import annotations
 
@@ -8,24 +8,28 @@ import json
 import os
 
 
-def load_manual_annotations(path: str | None) -> dict:
-    """
-    Human-supplied ground-truth entries (see manual_annotations.json), keyed
-    by catalog number. run_audit's per-specimen accuracy scoring falls back
-    to one of these whenever fetch_gbif_data() finds no published GBIF
-    occurrence for that specimen. Returns {} if path is None or the file
-    doesn't exist.
-    """
+def load_annotation_entries(path: str | None) -> dict:
+    """Read the annotations file: {specimen_id: {"transcription": str, "fields": dict}},
+    both parts optional. Also accepts the older formats: a bare string is a
+    transcription, and an entry with only "fields" is a ground-truth annotation.
+    Returns {} if path is None or the file doesn't exist."""
     if not path or not os.path.isfile(path):
         return {}
     with open(path, encoding="utf-8") as f:
         data = json.load(f)
-    return {k: v for k, v in data.items() if not k.startswith("_")}
+    return {k: ({"transcription": v} if isinstance(v, str) else v)
+            for k, v in data.items() if not k.startswith("_")}
+
+
+def load_manual_annotations(path: str | None) -> dict:
+    """Ground-truth entries (those with a "fields" block), used when GBIF has no
+    published occurrence for the specimen."""
+    return {k: v for k, v in load_annotation_entries(path).items() if v.get("fields")}
 
 
 def _truth_row_from_annotation(entry: dict) -> dict:
     """Same truth_row shape _process_one builds from a GBIF occurrence, built
-    instead from a manual_annotations.json entry's 'fields' block."""
+    instead from an annotations entry's 'fields' block."""
     f = entry.get("fields", {})
     return {
         "truth_scientificName":   f.get("scientificName", "N/A"),
