@@ -84,7 +84,7 @@ def run_herbaudit(model, prov, a, workdir):
 # ------------------------------------------------------------------ collect ---
 def collect(model, out_dir, n_images):
     """Read HerbAudit's own numbers from the per-image audit JSONs."""
-    acc, cost, tin, tout = [], [], [], []
+    acc, cost, tin, tout, tthink = [], [], [], [], []
     n_ok = 0
     for f in out_dir.glob("*_audit.json"):
         rec = json.loads(f.read_text(encoding="utf-8"))
@@ -95,12 +95,15 @@ def collect(model, out_dir, n_images):
         cost.append(meta.get("cost_usd") or 0.0)
         tin.append(meta.get("tokens_in") or 0)
         tout.append(meta.get("tokens_out") or 0)
+        if meta.get("tokens_thinking") is not None:  # absent in results cached before this field existed
+            tthink.append(meta["tokens_thinking"])
     if not n_ok:
         return None
     mean = lambda xs: sum(xs) / len(xs) if xs else float("nan")
     return dict(n_extracted=n_ok, n_failed=max(0, n_images - n_ok), n_scored=len(acc),
                 accuracy=mean(acc) * 100, cost_per_1000=mean(cost) * 1000,
-                tokens_in_avg=mean(tin), tokens_out_avg=mean(tout))
+                tokens_in_avg=mean(tin), tokens_out_avg=mean(tout),
+                tokens_thinking_avg=mean(tthink))
 
 
 # ------------------------------------------------------------------- plots ---

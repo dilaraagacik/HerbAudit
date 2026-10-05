@@ -93,6 +93,11 @@ def _resolve_media_resolution(choice: str):
 
 
 class HerbAudit:
+    # Thinking/reasoning tokens of the most recent LLM call (already included in
+    # tokens_out/cost); recorded separately as `tokens_thinking`. LLM calls run
+    # sequentially, so a plain attribute is enough.
+    _last_thinking_tok = 0
+
     def __init__(self, gemini_api_key: str = None, gemini_model: str = "gemini-3.5-flash-lite",
                  openai_api_key: str = None, openai_model: str = "gpt-4o-mini",
                  ollama_model: str = None, ollama_host: str = "http://localhost:11434",
@@ -144,15 +149,13 @@ class HerbAudit:
 
     def _make_gemini_config(self, temperature: float):
         """Build a GenerateContentConfig with the given temperature."""
-        _is_thinking_model = "2.5" in self.model
         media_res = _resolve_media_resolution(self.media_resolution)
+        # No thinking config is sent: every model uses its own API default.
         return genai_types.GenerateContentConfig(
             automatic_function_calling=genai_types.AutomaticFunctionCallingConfig(disable=True),
             response_modalities=["TEXT"],
             temperature=temperature,
             **({"media_resolution": media_res} if media_res is not None else {}),
-            **( {"thinking_config": genai_types.ThinkingConfig(thinking_budget=-1)}
-                if _is_thinking_model else {} )
         )
 
     @staticmethod
@@ -192,6 +195,7 @@ class HerbAudit:
                 usage   = getattr(resp, "usage_metadata", None)
                 in_tok, out_tok = self._gemini_usage_tokens(usage)
                 thought_tok = getattr(usage, "thoughts_token_count", 0) or 0
+                self._last_thinking_tok = thought_tok
                 print(f"  Single-pass OK — in={in_tok} out={out_tok}"
                       f"{f' (incl. {thought_tok} thinking)' if thought_tok else ''} temp={temperature:.1f}")
                 return parsed, in_tok, out_tok
@@ -208,6 +212,7 @@ class HerbAudit:
                         )
                         usage   = getattr(fix, "usage_metadata", None)
                         in_tok, out_tok = self._gemini_usage_tokens(usage)
+                        self._last_thinking_tok = getattr(usage, "thoughts_token_count", 0) or 0
                         return json.loads(fix.text.strip()), in_tok, out_tok
                     except Exception:
                         pass
@@ -267,6 +272,8 @@ class HerbAudit:
                 parsed  = json.loads(raw)
                 in_tok  = resp.usage.prompt_tokens     if resp.usage else 0
                 out_tok = resp.usage.completion_tokens if resp.usage else 0
+                _details = getattr(resp.usage, "completion_tokens_details", None) if resp.usage else None
+                self._last_thinking_tok = getattr(_details, "reasoning_tokens", 0) or 0
                 print(f"  Parsed OK — tokens in={in_tok} out={out_tok}")
                 return parsed, in_tok, out_tok
 
@@ -452,6 +459,7 @@ class HerbAudit:
         record["detector_used"] = detector_used
         record["tokens_in"]     = in_tok
         record["tokens_out"]    = out_tok
+        record["tokens_thinking"] = self._last_thinking_tok
         record["cost_usd"]      = cost_usd
         record["image_width"]   = img_w
         record["image_height"]  = img_h
@@ -682,7 +690,7 @@ class HerbAudit:
                                 answer_tok = usage.get("candidatesTokenCount", usage.get("candidates_token_count", 0)) or 0
                                 thought_tok = usage.get("thoughtsTokenCount", usage.get("thoughts_token_count", 0)) or 0
                                 out_tok = answer_tok + thought_tok
-                                chunk_outcomes[key] = ("ok", record, in_tok, out_tok)
+                                chunk_outcomes[key] = ("ok", record, in_tok, out_tok, thought_tok)
                             except Exception as exc:
                                 chunk_outcomes[key] = ("error", f"could not parse batch response: {exc}")
                         else:
@@ -713,7 +721,7 @@ class HerbAudit:
                     self.results.append({"source_image": img_path.name, "error": outcome[1]})
                     continue
 
-                _, record, in_tok, out_tok = outcome
+                _, record, in_tok, out_tok, thought_tok = outcome
                 record  = _normalize_record(record)
                 payload = payload_by_path[img_path]
                 cost_usd = self._cost_for(self.model, in_tok, out_tok)
@@ -725,6 +733,7 @@ class HerbAudit:
                 record["detector_used"] = payload.get("detector_used")
                 record["tokens_in"]     = in_tok
                 record["tokens_out"]    = out_tok
+                record["tokens_thinking"] = thought_tok
                 record["cost_usd"]      = cost_usd
                 record["image_width"]   = payload["img_w"]
                 record["image_height"]  = payload["img_h"]

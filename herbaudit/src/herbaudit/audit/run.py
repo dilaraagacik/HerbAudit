@@ -38,6 +38,62 @@ cv2 = np = pd = genai = genai_types = HerbAudit = taxonomic_audit = None
 OUTPUT_HTML       = "results.html"
 OUTPUT_XLSX       = "results.xlsx"
 
+# Darwin Core terms, in the column order of the no-reference Excel export.
+DWC_EXCEL_FIELDS = [
+    "catalogNumber", "scientificName", "scientificNameAuthorship", "genus", "specificEpithet",
+    "identifiedBy", "dateIdentified", "recordedBy", "recordNumber", "eventDate", "verbatimEventDate",
+    "continent", "country", "stateProvince", "county", "locality", "verbatimCoordinates",
+    "decimalLatitude", "decimalLongitude", "minimumElevationInMeters", "maximumElevationInMeters",
+    "habitat",
+]
+
+
+# Evaluation-mode field names that are not Darwin Core terms -> the DwC term used in the Excel export.
+_EXCEL_FIELD_NAME = {"Generic Name": "genus"}
+
+
+def _taxonomic_check(sci_name: str):
+    """(taxonomicStatus, acceptedNameUsage, nameAccordingTo) for one name:
+    WFO Checklistbank first, GBIF as fallback — same logic as the no-reference report."""
+    sci_name = sci_name.strip()
+    if not sci_name or sci_name.lower() in ("nan", "none", "n/a"):
+        return "", "", ""
+    try:
+        clean = strip_authors(sci_name)
+        cb = _wfo_checklistbank_match(sci_name)
+        if cb:
+            cb_status = (cb.get("status") or "").lower()
+            if cb_status in ("accepted", "provisionally accepted"):
+                return "accepted", clean, "WFO"
+            if "synonym" in cb_status:
+                cb_accepted = strip_authors(cb.get("accepted") or "")
+                if cb_accepted:
+                    return "synonym", cb_accepted, "WFO"
+        gbif = taxonomic_audit(clean)
+        status = (gbif.get("status") or "").upper()
+        if status == "ACCEPTED":
+            return "accepted", gbif.get("accepted") or clean, "GBIF"
+        if status == "SYNONYM":
+            return "synonym", gbif.get("accepted") or "", "GBIF"
+    except Exception as exc:
+        print(f"  taxonomy check failed for '{sci_name}': {exc}")
+    return "not found", "", ""
+
+
+def _taxonomic_status(tax_info):
+    """(taxonomicStatus, acceptedNameUsage, nameAccordingTo) from the taxonomy check."""
+    if not tax_info:
+        return "", "", ""
+    if tax_info.get("accepted"):  # confirmed by WFO Checklistbank
+        status = "synonym" if tax_info.get("is_synonym") else "accepted"
+        return status, tax_info["accepted"], tax_info.get("tax_source") or "WFO"
+    gbif = (tax_info.get("gbif_status") or "").upper()  # GBIF fallback
+    if gbif == "ACCEPTED":
+        return "accepted", tax_info.get("gbif_accepted") or "", "GBIF"
+    if gbif == "SYNONYM":
+        return "synonym", tax_info.get("gbif_accepted") or "", "GBIF"
+    return "not found", "", ""
+
 
 # Anchored to __file__ (not a relative path) so it resolves correctly
 # regardless of the cwd `herbaudit` is invoked from.
@@ -137,25 +193,22 @@ def _run_no_reference(vv_df: "pd.DataFrame", gemini_model: str, images_folder=No
         total_cost  += cost
         cards_html  += card_html
 
+        # Columns use Darwin Core term names, in DWC_EXCEL_FIELDS order.
         excel_row = {"filename": pure_id}
-        for ai_col, disp_label, _section in _NOREF_FIELDS:
-            excel_row[disp_label] = str(ai_row.get(ai_col, "")).strip()
-        excel_row["Latitude"]  = ai_row.get("decimalLatitude",  ai_row.get("latitude",  ""))
-        excel_row["Longitude"] = ai_row.get("decimalLongitude", ai_row.get("longitude", ""))
+        for term in DWC_EXCEL_FIELDS:
+            excel_row[term] = str(ai_row.get(term, "")).strip()   # transcription as extracted
+        # Synonym / accepted-name check (Darwin Core taxonomicStatus, acceptedNameUsage)
+        status, accepted_name, according_to = _taxonomic_status(tax_info)
+        excel_row["taxonomicStatus"]    = status
+        excel_row["acceptedNameUsage"]  = accepted_name
+        excel_row["nameAccordingTo"]    = according_to
         if tax_info:
-            excel_row["Taxonomy source"]         = tax_info.get("tax_source")
-            excel_row["Taxonomy accepted name"]  = tax_info.get("accepted")
-            excel_row["Is synonym"]              = tax_info.get("is_synonym")
-            excel_row["GBIF status"]             = tax_info.get("gbif_status")
-            excel_row["GBIF accepted"]           = tax_info.get("gbif_accepted")
-            excel_row["GBIF fuzzy suggestion"]   = tax_info.get("gbif_fuzzy_accepted")
-            excel_row["GBIF fuzzy similarity"]   = tax_info.get("gbif_fuzzy_sim")
-        excel_row["Image width"]   = img_meta.get("width")
-        excel_row["Image height"]  = img_meta.get("height")
-        excel_row["Model"]         = img_meta.get("model")
-        excel_row["Input tokens"]  = img_meta.get("input_tokens")
-        excel_row["Output tokens"] = img_meta.get("output_tokens")
-        excel_row["Cost USD"]      = img_meta.get("cost_usd")
+            excel_row["gbifFuzzySuggestion"] = tax_info.get("gbif_fuzzy_accepted")
+            excel_row["gbifFuzzySimilarity"] = tax_info.get("gbif_fuzzy_sim")
+        excel_row["model"]        = img_meta.get("model")
+        excel_row["inputTokens"]  = img_meta.get("input_tokens")
+        excel_row["outputTokens"] = img_meta.get("output_tokens")
+        excel_row["costUSD"]      = img_meta.get("cost_usd")
         excel_rows.append(excel_row)
 
     n           = len(vv_df)
@@ -882,23 +935,51 @@ sortCards(false);
 
     # One row per specimen; every audited field gets truth/ai/score/method/note
     # columns so the full per-field breakdown is exportable, not just the overall score.
+    # Column names are Darwin Core terms. The coordinate evaluation is one combined
+    # score, so it is split into decimalLatitude / decimalLongitude columns (AI value =
+    # raw transcription) plus a single "coordinates - score/method/note" set.
+    def _pid(fname):
+        return re.sub(r"\.(jpg|jpeg|png|JPG|PNG)$", "", str(fname), flags=re.IGNORECASE).strip()
+
+    ai_by_id = {_pid(r.get("filename", "")): r for _, r in vv_df.iterrows()}
+    all_ids  = [c[4] for c in matched_cards] + [c[4] for c in unmatched_cards]
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        tax_by_id = dict(zip(all_ids, pool.map(
+            lambda i: _taxonomic_check(str(ai_by_id[i].get("scientificName", "")) if i in ai_by_id else ""),
+            all_ids)))
+    _save_wfo_cache()
+
+    def _tax_columns(pure_id):
+        status, accepted, according = tax_by_id.get(pure_id, ("", "", ""))
+        return {"taxonomicStatus": status, "acceptedNameUsage": accepted, "nameAccordingTo": according}
+
     excel_rows = []
     for avg, _, _, field_results, pure_id, gid in matched_cards:
         row = {"filename": pure_id, "gbifID": gid, "status": "matched", "overall_score": round(avg, 4)}
+        ai_row = ai_by_id.get(pure_id)
         for fr in field_results:
-            base = fr["field"]
-            row[f"{base} - truth"]  = fr["truth"]
-            row[f"{base} - ai"]     = fr["ai"]
+            base = _EXCEL_FIELD_NAME.get(fr["field"], fr["field"])
+            if base == "coordinates":
+                t = re.findall(r"-?\d+(?:\.\d+)?", str(fr["truth"]))
+                for axis, term, i in (("lat", "decimalLatitude", 0), ("lon", "decimalLongitude", 1)):
+                    row[f"{term} - truth"] = float(t[i]) if len(t) >= 2 else ""
+                    row[f"{term} - ai"]    = str(ai_row.get(term, "")).strip() if ai_row is not None else ""
+            else:
+                row[f"{base} - truth"] = fr["truth"]
+                row[f"{base} - ai"]    = fr["ai"]
             row[f"{base} - score"]  = round(fr["score"], 4) if fr["score"] is not None else None
             row[f"{base} - method"] = fr["method"]
             row[f"{base} - note"]   = fr["note"]
+        row.update(_tax_columns(pure_id))
         excel_rows.append(row)
     for _, _, _, _, pure_id, gid in unmatched_cards:
-        excel_rows.append({"filename": pure_id, "gbifID": gid, "status": "unmatched", "overall_score": None})
+        row = {"filename": pure_id, "gbifID": gid, "status": "unmatched", "overall_score": None}
+        row.update(_tax_columns(pure_id))
+        excel_rows.append(row)
 
     field_summary_rows = [
         {
-            "field":         fa["field"],
+            "field":         _EXCEL_FIELD_NAME.get(fa["field"], fa["field"]),
             "mean_accuracy": round(fa["mean_accuracy"], 4) if fa["mean_accuracy"] is not None else None,
             "n_scored":      fa["n_scored"],
         }
