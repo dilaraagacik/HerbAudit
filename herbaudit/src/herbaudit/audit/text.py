@@ -1,7 +1,7 @@
 """Text cleaning and taxon-name utilities."""
 from __future__ import annotations
 
-import re
+import unicodedata
 
 from unidecode import unidecode
 
@@ -23,30 +23,31 @@ def clean_text(text):
     return " ".join(t.split())
 
 
-# Common non-Latin script blocks (Greek, Cyrillic, Armenian, Hebrew, Arabic,
-# Devanagari, Thai, Georgian, Hiragana/Katakana, CJK, Hangul) — deliberately
-# excludes the Latin-1 Supplement / Latin Extended ranges, since accented
-# Latin letters (é, ñ, ü...) aren't a script difference worth flagging.
-_NON_LATIN_SCRIPT_RE = re.compile(
-    "[Ͱ-ϿЀ-ӿ԰-֏֐-׿؀-ۿ"
-    "ऀ-ॿ฀-๿Ⴀ-ჿ぀-ヿ㐀-䶿"
-    "一-鿿가-힣]"
-)
+def _is_non_latin_letter(ch: str) -> bool:
+    # Every Unicode letter's name starts with its script ("CYRILLIC SMALL
+    # LETTER A", "BENGALI LETTER KA", "HANGUL SYLLABLE GA"...), so this covers
+    # all scripts rather than a hand-picked list of blocks. Accented Latin
+    # ("LATIN SMALL LETTER E WITH ACUTE") and full-width Latin ("FULLWIDTH
+    # LATIN CAPITAL LETTER A") both contain LATIN, so é, ñ, ü... aren't
+    # flagged — they aren't a script difference. Digits, punctuation and
+    # combining marks fail isalpha().
+    return ch.isalpha() and "LATIN" not in unicodedata.name(ch, "")
 
 
 def has_non_latin_script(text) -> bool:
-    """True if text contains a character from a non-Latin script. Used to
+    """True if text contains a letter from a non-Latin script. Used to
     flag report values worth showing a transliteration alongside — clean_text()
     already unidecodes these before scoring, but that transliterated form
     was never surfaced anywhere a human reviewer could see it."""
-    return bool(_NON_LATIN_SCRIPT_RE.search(str(text)))
+    return any(_is_non_latin_letter(ch) for ch in str(text))
 
 
 def transliterate(text) -> str:
     """Latin-alphabet transliteration via unidecode, exposed standalone (not
     through clean_text) so callers can display it without clean_text's
-    lowercasing / 'na'-collapsing baked in."""
-    return unidecode(str(text))
+    lowercasing / 'na'-collapsing baked in. Whitespace is collapsed, since
+    unidecode appends a space after each CJK character ("北京" -> "Bei Jing ")."""
+    return " ".join(unidecode(str(text)).split())
 
 
 def strip_authors(name):
