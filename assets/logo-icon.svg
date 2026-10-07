@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="HerbAudit">
+  <title>HerbAudit</title>
+  <defs>
+    <linearGradient id="leaf" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#5fd39a"/>
+      <stop offset="1" stop-color="#157a55"/>
+    </linearGradient>
+  </defs>
+  <!-- leaf -->
+  <path d="M236 40 C390 104 428 300 236 456 C44 300 82 104 236 40 Z" fill="url(#leaf)"/>
+  <!-- midrib + veins -->
+  <g fill="none" stroke="#ffffff" stroke-width="12" stroke-linecap="round" opacity=".85">
+    <path d="M236 84 L236 420"/>
+    <path d="M236 170 L172 126"/><path d="M236 170 L300 126"/>
+    <path d="M236 236 L160 186"/><path d="M236 236 L312 186"/>
+    <path d="M236 302 L318 252"/>
+  </g>
+  <!-- incorrect: x mark on the leaf -->
+  <circle cx="160" cy="300" r="46" fill="#e5484d" stroke="#ffffff" stroke-width="10"/>
+  <path d="M142 282 L178 318 M178 282 L142 318" fill="none" stroke="#ffffff" stroke-width="14" stroke-linecap="round"/>
+  <!-- correct: check badge -->
+  <circle cx="352" cy="394" r="68" fill="#1e64c8" stroke="#ffffff" stroke-width="12"/>
+  <path d="M320 396 L345 421 L388 368" fill="none" stroke="#ffffff" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

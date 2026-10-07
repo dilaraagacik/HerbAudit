@@ -1,0 +1,34 @@
+# Secrets
+.env
+*.env
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+venv/
+venv_herbaudit/
+
+# Model weights (large binaries — share via a release/download link, not git)
+*.pt
+weights/
+
+# herbaudit run output
+herbaudit_output/
+*_results.json
+*_report.html
+report.html
+results*.json
+results*.html
+results*.xlsx
+json_results.json
+json_report.html
+collage_results/
+
+# working data (specimen images, exported label projects, ad-hoc results)
+/files/
+
+# Caches
+.wfo_cache.json
