@@ -65,14 +65,15 @@ def _infer_provider(model_name: str) -> str:
         return "openai"
     return "ollama"
 
-_G  = "\033[38;5;83m"    # bright green  — flags
-_DG = "\033[38;5;65m"    # dim green     — descriptions
-_Y  = "\033[38;5;228m"   # yellow        — values / defaults
-_W  = "\033[38;5;252m"   # white         — normal text
+# Mid-tone colours so the help is readable on both light and dark terminals.
+_G  = "\033[38;5;28m"    # green         — flags
+_DG = "\033[38;5;65m"    # muted green   — descriptions
+_Y  = "\033[38;5;130m"   # amber         — values / defaults
+_W  = "\033[39m"         # terminal's default text colour — normal text
 _B  = "\033[1m"          # bold
-_R  = "\033[38;5;203m"   # red/orange    — required badge
-_S  = "\033[38;5;240m"   # dim grey      — section separators
-_C  = "\033[38;5;108m"   # muted green   — choices
+_R  = "\033[38;5;160m"   # red           — required badge
+_S  = "\033[38;5;244m"   # grey          — section separators
+_C  = "\033[38;5;30m"    # teal          — choices
 _X  = "\033[0m"          # reset
 
 
