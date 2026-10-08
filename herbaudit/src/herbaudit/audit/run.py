@@ -933,11 +933,11 @@ sortCards(false);
     with open(html_path, "w", encoding="utf-8") as f:
         f.write(html)
 
-    # One row per specimen; every audited field gets truth/ai/score/method/note
-    # columns so the full per-field breakdown is exportable, not just the overall score.
-    # Column names are Darwin Core terms. The coordinate evaluation is one combined
-    # score, so it is split into decimalLatitude / decimalLongitude columns (AI value =
-    # raw transcription) plus a single "coordinates - score/method/note" set.
+    # Excel layout:
+    #   "Darwin Core"   one row per specimen: the AI transcription under Darwin Core term names
+    #                   (coordinates exactly as transcribed) + taxonomicStatus / acceptedNameUsage.
+    #   "Evaluation"    one row per specimen and field: truth, ai, score, method, note.
+    #   "Field Summary" mean accuracy per field.
     def _pid(fname):
         return re.sub(r"\.(jpg|jpeg|png|JPG|PNG)$", "", str(fname), flags=re.IGNORECASE).strip()
 
@@ -949,33 +949,37 @@ sortCards(false);
             all_ids)))
     _save_wfo_cache()
 
-    def _tax_columns(pure_id):
+    scores_by_id = {c[4]: (c[5], round(c[0], 4)) for c in matched_cards}   # id -> (gbifID, overall score)
+    dwc_rows = []
+    for pure_id in all_ids:
+        ai_row = ai_by_id.get(pure_id)
+        gid, overall_score = scores_by_id.get(pure_id, (pure_id, None))
+        row = {"filename": pure_id}
+        for term in DWC_EXCEL_FIELDS:
+            row[term] = str(ai_row.get(term, "")).strip() if ai_row is not None else ""
         status, accepted, according = tax_by_id.get(pure_id, ("", "", ""))
-        return {"taxonomicStatus": status, "acceptedNameUsage": accepted, "nameAccordingTo": according}
+        row["taxonomicStatus"]   = status
+        row["acceptedNameUsage"] = accepted
+        row["nameAccordingTo"]   = according
+        row["gbifID"]            = gid
+        row["status"]            = "matched" if pure_id in scores_by_id else "unmatched"
+        row["overall_score"]     = overall_score
+        dwc_rows.append(row)
 
-    excel_rows = []
+    eval_rows = []
     for avg, _, _, field_results, pure_id, gid in matched_cards:
-        row = {"filename": pure_id, "gbifID": gid, "status": "matched", "overall_score": round(avg, 4)}
         ai_row = ai_by_id.get(pure_id)
         for fr in field_results:
-            base = _EXCEL_FIELD_NAME.get(fr["field"], fr["field"])
-            if base == "coordinates":
-                t = re.findall(r"-?\d+(?:\.\d+)?", str(fr["truth"]))
-                for axis, term, i in (("lat", "decimalLatitude", 0), ("lon", "decimalLongitude", 1)):
-                    row[f"{term} - truth"] = float(t[i]) if len(t) >= 2 else ""
-                    row[f"{term} - ai"]    = str(ai_row.get(term, "")).strip() if ai_row is not None else ""
-            else:
-                row[f"{base} - truth"] = fr["truth"]
-                row[f"{base} - ai"]    = fr["ai"]
-            row[f"{base} - score"]  = round(fr["score"], 4) if fr["score"] is not None else None
-            row[f"{base} - method"] = fr["method"]
-            row[f"{base} - note"]   = fr["note"]
-        row.update(_tax_columns(pure_id))
-        excel_rows.append(row)
-    for _, _, _, _, pure_id, gid in unmatched_cards:
-        row = {"filename": pure_id, "gbifID": gid, "status": "unmatched", "overall_score": None}
-        row.update(_tax_columns(pure_id))
-        excel_rows.append(row)
+            field = _EXCEL_FIELD_NAME.get(fr["field"], fr["field"])
+            ai_val = fr["ai"]
+            if field == "coordinates" and ai_row is not None:   # raw transcription, not the formatted value
+                ai_val = f"{str(ai_row.get('decimalLatitude', '')).strip()}, {str(ai_row.get('decimalLongitude', '')).strip()}"
+            eval_rows.append({
+                "filename": pure_id, "gbifID": gid, "field": field,
+                "truth": fr["truth"], "ai": ai_val,
+                "score": round(fr["score"], 4) if fr["score"] is not None else None,
+                "method": fr["method"], "note": fr["note"],
+            })
 
     field_summary_rows = [
         {
@@ -987,7 +991,8 @@ sortCards(false);
     ]
 
     with pd.ExcelWriter(xlsx_path, engine="openpyxl") as writer:
-        pd.DataFrame(excel_rows).to_excel(writer, sheet_name="Results", index=False)
+        pd.DataFrame(dwc_rows).to_excel(writer, sheet_name="Darwin Core", index=False)
+        pd.DataFrame(eval_rows).to_excel(writer, sheet_name="Evaluation", index=False)
         pd.DataFrame(field_summary_rows).to_excel(writer, sheet_name="Field Summary", index=False)
 
     print(f"\n Audit complete → {html_path}")
