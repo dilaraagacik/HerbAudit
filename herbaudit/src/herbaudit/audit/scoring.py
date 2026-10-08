@@ -63,7 +63,7 @@ def token_pair_cer(tru_tokens: list[str], ext_tokens: list[str],
             tw, ew = tru_tokens[i], ext_tokens[j]
             # A single-letter initial that's the first letter of the other
             # side's word isn't an error — "j" vs "jacques" is the same
-            # person's name, just abbreviated differently. Free, not charged.
+            # person's name, just abbreviated differently. 
             if (len(tw) == 1 and ew.startswith(tw)) or (len(ew) == 1 and tw.startswith(ew)):
                 continue
             total_edit_cost += Levenshtein.distance(tw, ew)
@@ -108,12 +108,7 @@ def get_accuracy(target, extraction, is_tax=False, is_coll=False,
 
     if e_raw == "na":
         if is_tax or is_coll or is_date:
-            # Truth IS available but the AI didn't extract it — score as a
-            # real miss (not N/A) so it counts against the average. Scoped to
-            # taxonomy/collector/date since those are almost always printed
-            # on the label; geography is excluded because some GBIF geo
-            # values (e.g. stateProvince) are curator-added via geocoding,
-            # not label-read.
+
             return 0.0, "missing", "#f8d7da", "AI did not extract this field"
         return 0.0, "N/A", "#f8f9fa", ""
 
@@ -121,11 +116,7 @@ def get_accuracy(target, extraction, is_tax=False, is_coll=False,
         t_raw, e_raw, target, extraction, is_tax, is_coll, is_date, is_geo, gbif_meta,
         is_epithet=is_epithet, strict_geo=strict_geo)
 
-    # A mismatch might be GBIF's fault, not the AI's — when a manual sheet
-    # transcription is available and the score above found a real mismatch
-    # (not a None score, which means synonym/off-target exclusion rather
-    # than "wrong"), override it via manual_text_reconcile's exact/fuzzy/CER
-    # resolution against whichever side (GBIF or the sheet) it confirms.
+
     if score is not None and score < 1.0 and manual_text:
         from herbaudit.manual_text_reconcile import resolve_via_manual_text
         resolved = resolve_via_manual_text(target, extraction, manual_text, is_date=is_date, is_coll=is_coll, is_geo=is_geo)
@@ -212,23 +203,6 @@ def _baseline_accuracy(t_raw, e_raw, target, extraction, is_tax, is_coll, is_dat
         clean_extr   = strip_authors(extraction)
         if t_raw == e_raw:
             return 1.0, "Taxon-Match", "#d1e7dd", "Exact match"
-
-        # Below this, target/extraction are queried against GBIF/WFO's
-        # backbone as given, which assumes independent taxonomic standing —
-        # not valid for a bare specific epithet (the same Latin word gets
-        # reused across unrelated genera/families). Skipped for
-        # is_epithet=True, which falls straight through to plain CER
-        # comparison below.
-        #
-        # Also skipped when the stripped binomial already matches exactly:
-        # at that point there's no species-identity question left for
-        # GBIF/WFO to resolve, so any remaining difference (t_raw != e_raw,
-        # or we wouldn't be here) is purely authorship/formatting — falling
-        # into check_synonym_fallback here would misreport it as a "synonym"
-        # relationship (WFO/GBIF backbone can't tell "same name, different
-        # authorship" apart from "different name, same accepted taxon") and
-        # wrongly exclude it from scoring instead of letting the CER
-        # fallback below reflect the actual authorship discrepancy.
         if is_epithet or clean_target == clean_extr:
             pass
         else:
@@ -239,20 +213,6 @@ def _baseline_accuracy(t_raw, e_raw, target, extraction, is_tax, is_coll, is_dat
             if is_label_syn:
                 return None, EXCLUDED_SENTINEL, "#fff8e1", found_in
 
-            # Neither a synonym nor a verbatim-label match — but if GBIF's own
-            # backbone recognizes the AI's name AS WRITTEN (an EXACT match)
-            # as a real taxon at all, it's not OCR garble, just a
-            # different/outdated determination — exclude it from CER
-            # scoring, flagged distinctly from an actual synonym. A FUZZY
-            # match doesn't qualify: GBIF had to rewrite the string to find
-            # a hit, so the literal extracted text isn't itself a real name.
-            #
-            # Only exclude when it's the SAME family as the truth name — a
-            # plausible mix-up between related taxa. A different family
-            # entirely (e.g. truth is an oak, AI said a rose) is much more
-            # likely a genuine misidentification/hallucination than a valid
-            # alternate determination, so let it fall through to be scored
-            # via CER below instead of silently excluded from the average.
             a_match = _gbif_match_with_authorship_retry(extraction)
             if a_match is not None and a_match.get("matchType") == "EXACT":
                 t_match = _gbif_match_with_authorship_retry(target)
@@ -277,10 +237,7 @@ def _baseline_accuracy(t_raw, e_raw, target, extraction, is_tax, is_coll, is_dat
 
         def _coll_tokens(text):
             # Strip bracketed annotations (e.g. a GBIF-appended "[1908-04]"
-            # date) and "s.n." ("sine numero" — no collection number), which
-            # aren't part of anyone's name, then punctuation. Single-letter
-            # tokens (initials) are kept and scored directly by
-            # token_pair_cer below; bare numbers are dropped entirely.
+            # date) 
             text = re.sub(r"\[.*?\]", " ", text)
             text = re.sub(r"\bs\.?n\.?\b", " ", text, flags=re.I)
             stripped = re.sub(r"[^\w\s]", " ", text)
@@ -339,7 +296,7 @@ def _baseline_accuracy(t_raw, e_raw, target, extraction, is_tax, is_coll, is_dat
         # those apart, so it reports only the closest known name.
         src, nearest, sim = _nearest_taxon(extraction)
         if nearest is None:
-            note = "Not found in WFO — possible OCR/extraction error"
+            note = "Not found in WFO — possible extraction error"
         elif sim >= 0.98:
             note = f"Closest {src} match: <i>{nearest}</i> ({int(sim * 100)}% similar) — relationship to GBIF truth not verified"
         elif sim >= 0.60:
