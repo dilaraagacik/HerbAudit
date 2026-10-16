@@ -32,3 +32,12 @@ collage_results/
 
 # Caches
 .wfo_cache.json
+
+Hespi/
+IMAGES/
+gbif_images/
+herbaudit_output_*/
+results_*/
+output_voucher_vision/
+VV.ipynb
+model_comparison_*.png
