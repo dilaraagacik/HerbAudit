@@ -650,8 +650,8 @@ def build_card(fname, gid, truth_row, ai_row, field_map, images_folder=None, man
             <thead>
               <tr style='border-bottom:2px solid #f3f4f6;'>
                 <th style='padding:8px; font-size:0.6rem; font-weight:700; letter-spacing:1px; color:#9ca3af; text-transform:uppercase; text-align:left; width:18%;'>Field</th>
-                <th style='padding:8px; font-size:0.6rem; font-weight:700; letter-spacing:1px; color:#9ca3af; text-transform:uppercase; text-align:left; width:23%;'>GBIF (truth)</th>
-                <th style='padding:8px; font-size:0.6rem; font-weight:700; letter-spacing:1px; color:#9ca3af; text-transform:uppercase; text-align:left; width:23%;'>AI extraction</th>
+                <th style='padding:8px; font-size:0.6rem; font-weight:700; letter-spacing:1px; color:#9ca3af; text-transform:uppercase; text-align:left; width:23%;'>Truth</th>
+                <th style='padding:8px; font-size:0.6rem; font-weight:700; letter-spacing:1px; color:#9ca3af; text-transform:uppercase; text-align:left; width:23%;'>Transcription</th>
                 <th style='padding:8px; font-size:0.6rem; font-weight:700; letter-spacing:1px; color:#9ca3af; text-transform:uppercase; text-align:left; width:20%;'>Method</th>
                 <th style='padding:8px; font-size:0.6rem; font-weight:700; letter-spacing:1px; color:#9ca3af; text-transform:uppercase; text-align:right; width:16%;'>Score</th>
               </tr>
@@ -1027,7 +1027,7 @@ def build_no_reference_card(fname, ai_row, tax_info, img_meta, images_folder=Non
             <thead>
               <tr style='border-bottom:2px solid #f3f4f6;'>
                 <th style='padding:8px; font-size:0.6rem; font-weight:700; letter-spacing:1px; color:#9ca3af; text-transform:uppercase; text-align:left; width:24%;'>Field</th>
-                <th style='padding:8px; font-size:0.6rem; font-weight:700; letter-spacing:1px; color:#9ca3af; text-transform:uppercase; text-align:left; width:46%;'>AI extraction</th>
+                <th style='padding:8px; font-size:0.6rem; font-weight:700; letter-spacing:1px; color:#9ca3af; text-transform:uppercase; text-align:left; width:46%;'>Transcription</th>
                 <th style='padding:8px; font-size:0.6rem; font-weight:700; letter-spacing:1px; color:#9ca3af; text-transform:uppercase; text-align:left; width:30%;'>Taxonomy</th>
               </tr>
             </thead>
