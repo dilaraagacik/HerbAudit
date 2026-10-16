@@ -61,7 +61,7 @@ contour detection (lower accuracy on cluttered sheets).
 ## Usage
 
 ```bash
-herbaudit --input ./scans --model gemini-2.5-flash
+herbaudit ./scans --model gemini-2.5-flash
 ```
 
 The `--model` name alone picks the provider — no separate `--provider` flag:
@@ -75,9 +75,9 @@ The `--model` name alone picks the provider — no separate `--provider` flag:
 Common flags:
 
 ```bash
-herbaudit --input ./scans --model qwen2.5vl:7b --ollama-host http://localhost:11434
-herbaudit --input ./scans --model gemini-2.5-flash --no-reference   # skip GBIF lookup
-herbaudit --input ./scans --model gemini-2.5-flash --detector opencv
+herbaudit ./scans --model qwen2.5vl:7b --ollama-host http://localhost:11434
+herbaudit ./scans --model gemini-2.5-flash --no-reference   # skip GBIF lookup
+herbaudit ./scans --model gemini-2.5-flash --detector opencv
 ```
 
 Run `herbaudit --help` for the full flag reference.
@@ -85,7 +85,7 @@ Run `herbaudit --help` for the full flag reference.
 ## Reference data and annotations
 
 By default each specimen is checked against its GBIF record, matched by the
-image filename (without extension). `--input` can also be a CSV or Excel file
+image filename (without extension). The input path can also be a CSV or Excel file
 of existing transcriptions, which are evaluated as they are, without a new
 transcription step.
 

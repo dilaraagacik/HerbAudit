@@ -3,7 +3,7 @@
 accuracy vs. time.
 
 Nothing is scored or priced here. For every model this script:
-  1. runs `herbaudit --input ... --model ...` (accuracy is HerbAudit's own scoring
+  1. runs `herbaudit <images> --model ...` (accuracy is HerbAudit's own scoring
      against GBIF / the manual annotations, cost is HerbAudit's own cost_usd),
   2. times the run (per-image extraction time as printed by HerbAudit, plus wall clock),
   3. reads ./herbaudit_output_<model>/*_audit.json (herbaudit_accuracy, cost_usd,

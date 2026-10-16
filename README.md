@@ -83,7 +83,7 @@ unzip -p /tmp/leafmachine2_release.zip release_v-2-1/acd/best.pt \
 
 
 ```bash
-herbaudit --input herbaudit/test/5173738301.jpg --model gemini-3.5-flash-lite 
+herbaudit herbaudit/test/5173738301.jpg --model gemini-3.5-flash-lite 
 ```
 
 The `--model` name alone picks the provider — no separate `--provider` flag:
@@ -97,9 +97,9 @@ The `--model` name alone picks the provider — no separate `--provider` flag:
 Common flags:
 
 ```bash
-herbaudit --input ./scans --model qwen2.5vl:7b --ollama-host http://localhost:11434
-herbaudit --input ./scans --model gemini-2.5-flash --no-reference   # skip evaluation get transcription results only
-herbaudit --input ./scans --model gemini-2.5-flash --detector opencv   # skip the YOLO detector
+herbaudit ./scans --model qwen2.5vl:7b --ollama-host http://localhost:11434
+herbaudit ./scans --model gemini-2.5-flash --no-reference   # skip evaluation get transcription results only
+herbaudit ./scans --model gemini-2.5-flash --detector opencv   # skip the YOLO detector
 ```
 
 Run `herbaudit --help` for the full flag reference.
@@ -107,7 +107,7 @@ Run `herbaudit --help` for the full flag reference.
 ## Reference data and annotations
 
 By default each specimen is checked against its GBIF record, matched by the
-image filename (without extension). `--input` can also be a CSV or Excel file
+image filename (without extension). The input path can also be a CSV or Excel file
 of existing transcriptions, which are evaluated as they are, without a new
 transcription step.
 

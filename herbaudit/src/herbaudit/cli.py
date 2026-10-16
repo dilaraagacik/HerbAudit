@@ -107,13 +107,15 @@ def _print_help():
     print()
     print(f"  {_G}{_B}HerbAudit{_X}  {_DG}AI-powered herbarium specimen transcription and validation{_X}")
     print()
-    print(f"  {_W}Usage:{_X}  {_G}herbaudit{_X} {_Y}--input{_X} {_DG}<path>{_X}"
+    print(f"  {_W}Usage:{_X}  {_G}herbaudit{_X} {_Y}<path>{_X}"
           f"  {_S}[options]{_X}")
     print(f"  {_DG}Config: ~/.herbaudit/config.toml is auto-loaded if present "
           f"(--config / HERBAUDIT_CONFIG to override) — CLI flags always win.{_X}")
 
     section("Required")
-    row("--input", "PATH", "Folder of images  or  a CSV / Excel extraction file",
+    row("<path>", "", "Folder of images, a CSV / Excel extraction file, or a .txt of "
+        "gbif.org/occurrence links or ids (images are downloaded to ./<name>_images first). "
+        "Also accepted as --input PATH",
         required=True)
     row("--config", "PATH", "Config file to load instead of the default ~/.herbaudit/config.toml ")
 
@@ -148,7 +150,7 @@ def _print_help():
 
     section("Example")
     print(f"  {_DG}${_X} {_G}herbaudit{_X}"
-          f"  {_Y}--input{_X} ./images"
+          f"  {_Y}./images{_X}"
           f"  {_Y}--model{_X} gemini-2.5-pro"
           f"  {_Y}--no-reference{_X}")
     print()
@@ -164,7 +166,8 @@ def main():
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("-h", "--help", nargs=0, action=_HelpAction)
 
-    parser.add_argument("--input",          required=True)
+    parser.add_argument("path", nargs="?", default=None, metavar="PATH")
+    parser.add_argument("--input", dest="input_flag", default=None, metavar="PATH")
     parser.add_argument("--config",         default=None, metavar="PATH")
     parser.add_argument("--model",          default=None, metavar="NAME",
                         help="One flag for any provider's model — e.g. gemini-2.5-pro, "
@@ -210,6 +213,19 @@ def main():
         sys.exit(0)
 
     args = parser.parse_args()
+
+    # The input can be given positionally or with --input; both mean the same.
+    if args.path and args.input_flag and args.path != args.input_flag:
+        parser.error("give the input once: either as PATH or with --input, not both")
+    args.input = args.path or args.input_flag
+    if not args.input:
+        parser.error("the input is required: herbaudit PATH [options]")
+
+    from herbaudit.pipeline.gbif_links import download_gbif_images, is_gbif_links
+    if is_gbif_links(args.input):
+        # GBIF links or ids: fetch their images first, then audit that folder.
+        stem = Path(args.input).stem if Path(args.input).is_file() else "gbif"
+        args.input = str(download_gbif_images(args.input, f"{stem}_images"))
 
     # --verbose also unlocks the vendored YOLOv5 code's own INFO logging, which
     # reads YOLOv5_VERBOSE at import time — must be set before detection runs.
