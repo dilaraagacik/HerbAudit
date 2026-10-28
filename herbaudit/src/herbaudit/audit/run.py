@@ -14,6 +14,7 @@ from .gbif import fetch_gbif_data, smart_get, _gbif_fuzzy_resolve
 from .wfo import _load_wfo_cache, _save_wfo_cache, _wfo_lookup, _wfo_checklistbank_match
 from .report import build_card, _make_unmatched_card, build_no_reference_card, _NOREF_FIELDS, fmt_pct
 from .manual_ground_truth import load_manual_annotations, _truth_row_from_annotation
+from .bdq import bdq_rows, write_bdq_html, write_bdq_sheets
 
 def _lazy_imports():
     """Import slow packages on first use, not at CLI startup."""
@@ -40,12 +41,19 @@ OUTPUT_XLSX       = "results.xlsx"
 
 # Darwin Core terms, in the column order of the no-reference Excel export.
 DWC_EXCEL_FIELDS = [
-    "catalogNumber", "scientificName", "scientificNameAuthorship", "genus", "specificEpithet",
+    "catalogNumber", "scientificName", "scientificNameAuthorship", "family", "genus", "specificEpithet", "typeStatus",
     "identifiedBy", "dateIdentified", "recordedBy", "recordNumber", "eventDate", "verbatimEventDate",
     "continent", "country", "stateProvince", "county", "locality", "verbatimCoordinates",
-    "decimalLatitude", "decimalLongitude", "minimumElevationInMeters", "maximumElevationInMeters",
+    "decimalLatitude", "decimalLongitude", "minimumElevationInMeters", "maximumElevationInMeters", "verbatimElevation",
     "habitat",
 ]
+
+
+def _bdq_summary(rows: list[dict]) -> str:
+    """e.g. "380 run, 41 NOT_COMPLIANT, 60 could not run (see the BDQ Summary sheet)"."""
+    failed = sum(r["result"] == "NOT_COMPLIANT" for r in rows)
+    skipped = sum(r["status"] in ("INTERNAL_PREREQUISITES_NOT_MET", "EXTERNAL_PREREQUISITES_NOT_MET") for r in rows)
+    return f"{len(rows)} run, {failed} NOT_COMPLIANT, {skipped} could not run (see the BDQ Summary sheet)"
 
 
 # Evaluation-mode field names that are not Darwin Core terms -> the DwC term used in the Excel export.
@@ -100,7 +108,8 @@ def _taxonomic_status(tax_info):
 DEFAULT_ANNOTATIONS_PATH = str(Path(__file__).parent / "files" / "annotations.json")
 
 
-def _run_no_reference(vv_df: "pd.DataFrame", gemini_model: str, images_folder=None, output_tag=None):
+def _run_no_reference(vv_df: "pd.DataFrame", gemini_model: str, images_folder=None, output_tag=None,
+                      bdq_test=False, no_html=False):
     """
     Build a standalone HTML report with no GBIF lookup.
     Shows all extracted fields, WFO taxonomy status, cost and resolution.
@@ -113,6 +122,7 @@ def _run_no_reference(vv_df: "pd.DataFrame", gemini_model: str, images_folder=No
     total_cost  = 0.0
     n_synonyms  = 0
     excel_rows  = []
+    bdq_results = []
 
     print(f"Building noreference report for {len(vv_df)} specimens...")
 
@@ -210,6 +220,8 @@ def _run_no_reference(vv_df: "pd.DataFrame", gemini_model: str, images_folder=No
         excel_row["outputTokens"] = img_meta.get("output_tokens")
         excel_row["costUSD"]      = img_meta.get("cost_usd")
         excel_rows.append(excel_row)
+        if bdq_test:
+            bdq_results.extend(bdq_rows(pure_id, ai_row))
 
     n           = len(vv_df)
     model_label = vv_df["_model"].iloc[0] if "_model" in vv_df.columns and len(vv_df) else gemini_model
@@ -321,15 +333,26 @@ sortCards('name');
 </body>
 </html>"""
 
-    with open(OUTPUT_NOREF, "w", encoding="utf-8") as f:
-        f.write(html)
+    if not no_html:
+        with open(OUTPUT_NOREF, "w", encoding="utf-8") as f:
+            f.write(html)
 
-    pd.DataFrame(excel_rows).to_excel(OUTPUT_NOREF_XLSX, index=False)
+    if bdq_test:
+        with pd.ExcelWriter(OUTPUT_NOREF_XLSX, engine="openpyxl") as writer:
+            pd.DataFrame(excel_rows).to_excel(writer, sheet_name="Darwin Core", index=False)
+            write_bdq_sheets(writer, bdq_results)
+    else:
+        pd.DataFrame(excel_rows).to_excel(OUTPUT_NOREF_XLSX, index=False)
 
-    print(f"\nNo reference report → {OUTPUT_NOREF}")
+    print(f"\nNo reference report → {OUTPUT_NOREF}" if not no_html else "\nNo reference report (HTML skipped, --no-html)")
     print(f"   Excel export → {OUTPUT_NOREF_XLSX}")
     print(f"   Specimens  : {n}")
     print(f"   Synonyms   : {n_synonyms}")
+    if bdq_test:
+        print(f"   BDQ tests  : {_bdq_summary(bdq_results)}")
+        bdq_html = OUTPUT_NOREF_XLSX.replace(".xlsx", "_bdq.html")
+        write_bdq_html(bdq_results, bdq_html)
+        print(f"   BDQ report : {bdq_html}")
     print(f"   Total cost : ${total_cost:.4f}")
     if n:
         print(f"   Avg cost   : ${total_cost/n:.5f}")
@@ -346,7 +369,7 @@ def run_audit(input_path=None, images_folder=None, truth_path=None,
               output_tag=None, force=False,
               batch=False, batch_chunk_mb=1000, batch_submit_workers=5,
               batch_poll_interval=30.0,
-              annotations_path=None):
+              annotations_path=None, bdq_test=False, no_html=False):
     """
     Run the full GBIF-comparison audit (or the --no_reference report when
     `noreference` is set) and write the HTML/Excel results.
@@ -478,7 +501,7 @@ def run_audit(input_path=None, images_folder=None, truth_path=None,
     )
 
     if noreference:
-        _run_no_reference(vv_df, gemini_model, images_folder, output_tag=output_tag)
+        _run_no_reference(vv_df, gemini_model, images_folder, output_tag=output_tag, bdq_test=bdq_test, no_html=no_html)
         _save_wfo_cache()
         return
 
@@ -930,14 +953,16 @@ sortCards(false);
     html_path = str(Path(output_dir) / (f"results_{output_tag}.html" if output_tag else OUTPUT_HTML))
     xlsx_path = str(Path(output_dir) / (f"results_{output_tag}.xlsx" if output_tag else OUTPUT_XLSX))
 
-    with open(html_path, "w", encoding="utf-8") as f:
-        f.write(html)
+    if not no_html:
+        with open(html_path, "w", encoding="utf-8") as f:
+            f.write(html)
 
     # Excel layout:
     #   "Darwin Core"   one row per specimen: the AI transcription under Darwin Core term names
     #                   (coordinates exactly as transcribed) + taxonomicStatus / acceptedNameUsage.
     #   "Evaluation"    one row per specimen and field: truth, ai, score, method, note.
     #   "Field Summary" mean accuracy per field.
+    #   "BDQ"           with --bdq_test: one row per specimen and TDWG BDQ test, run on the AI transcription.
     def _pid(fname):
         return re.sub(r"\.(jpg|jpeg|png|JPG|PNG)$", "", str(fname), flags=re.IGNORECASE).strip()
 
@@ -990,14 +1015,23 @@ sortCards(false);
         for fa in field_accuracy
     ]
 
+    bdq_results = [r for pure_id in all_ids for r in bdq_rows(pure_id, ai_by_id.get(pure_id))] if bdq_test else []
+
     with pd.ExcelWriter(xlsx_path, engine="openpyxl") as writer:
         pd.DataFrame(dwc_rows).to_excel(writer, sheet_name="Darwin Core", index=False)
         pd.DataFrame(eval_rows).to_excel(writer, sheet_name="Evaluation", index=False)
         pd.DataFrame(field_summary_rows).to_excel(writer, sheet_name="Field Summary", index=False)
+        if bdq_test:
+            write_bdq_sheets(writer, bdq_results)
 
-    print(f"\n Audit complete → {html_path}")
+    print(f"\n Audit complete → {html_path}" if not no_html else "\n Audit complete (HTML skipped, --no-html)")
     print(f"   Excel export  → {xlsx_path}")
     print(f"   Matched    : {n}  |  Excellent: {n_good}  Acceptable: {n_ok}  Poor: {n_poor}")
     print(f"   Images     : {n_images}")
     print(f"   No truth   : {n_unmatched}")
     print(f"   Mean accuracy : {fmt_pct(overall)}")
+    if bdq_test:
+        print(f"   BDQ tests     : {_bdq_summary(bdq_results)}")
+        bdq_html = xlsx_path.replace(".xlsx", "_bdq.html")
+        write_bdq_html(bdq_results, bdq_html)
+        print(f"   BDQ report    : {bdq_html}")

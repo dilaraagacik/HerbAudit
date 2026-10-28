@@ -736,6 +736,7 @@ _NOREF_FIELDS = [
     ("scientificNameAuthorship",     "Authorship",              "Taxonomy"),
     ("identifiedBy",                 "Identified by",           "Taxonomy"),
     ("dateIdentified",               "Identified date",         "Taxonomy"),
+    ("typeStatus", "Type status", "Taxonomy"),
     ("recordedBy",                   "Collected by",            "Collector"),
     ("recordNumber",                 "Collector number",        "Collector"),
     ("verbatimEventDate",            "Date (verbatim)",         "Collector"),

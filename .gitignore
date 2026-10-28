@@ -10,6 +10,7 @@ __pycache__/
 .venv/
 venv/
 venv_herbaudit/
+compare_models_local.py
 
 # Model weights (large binaries — share via a release/download link, not git)
 *.pt

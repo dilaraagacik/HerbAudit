@@ -36,6 +36,7 @@ dependencies = [
     "numpy",
     "python-dateutil",
     "hdx-python-country",
+    "shapely",
     'tomli; python_version < "3.11"',
     "torch",
     "torchvision",
@@ -56,5 +57,5 @@ herbaudit = "herbaudit.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-"herbaudit.audit" = ["files/*.json"]
+"herbaudit.audit" = ["files/*.json", "files/*.json.gz"]
 "herbaudit.vendor.leafmachine2_detector" = ["LICENSE", "NOTICE.md"]

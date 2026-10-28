@@ -134,6 +134,9 @@ def _print_help():
         default="herbaudit/files/annotations.json")
     # TODO: --ocr row hidden until herbaudit.ocr_evaluator is ported into this package.
     row("--output", "NAME", "Label this run's output files")
+    row("--bdq_test", "", "Also run the TDWG BDQ data quality tests on each transcription "
+        "(adds a BDQ sheet to the Excel export)")
+    row("--no-html", "", "Skip the HTML report (big runs make very large HTML files); the Excel export is still written")
     row("--force", "", "Re-run every image even if ./herbaudit_output/<name>_audit.json already exists")
 
     section("Image processing")
@@ -201,6 +204,8 @@ def main():
                              "different --model is auto-detected and re-run anyway, but "
                              "--no-collage changes aren't tracked, so switching "
                              "it without --force silently replays the old result.")
+    parser.add_argument("--bdq_test", "--bdq-test", dest="bdq_test", action="store_true", default=False)
+    parser.add_argument("--no-html", "--no_html", dest="no_html", action="store_true", default=False)
     parser.add_argument("--no-collage",     action="store_true", default=False)
     parser.add_argument("--detector",       default=None,
                         choices=["auto", "opencv"])
@@ -280,6 +285,8 @@ def main():
     media_resolution = "high"
 
     no_reference   = _cfg_bool("report", "no_reference", args.no_reference)
+    bdq_test       = _cfg_bool("report", "bdq_test", args.bdq_test)
+    no_html        = _cfg_bool("report", "no_html", args.no_html)
 
     detector       = _cfg("image", "detector", args.detector, "auto")
     no_collage     = _cfg_bool("image", "no_collage", args.no_collage)
@@ -348,6 +355,8 @@ def main():
         batch          = batch,
         force          = args.force,
         annotations_path = args.annotations,
+        bdq_test       = bdq_test,
+        no_html        = no_html,
     )
 
     elapsed    = time.perf_counter() - t_start

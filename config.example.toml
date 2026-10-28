@@ -13,6 +13,8 @@ ollama_host = "http://localhost:11434"
 
 [report]
 no_reference = false
+bdq_test = false                 # true = also run the TDWG BDQ tests (adds a BDQ sheet)
+no_html = false                  # true = skip the HTML report, write only the Excel export
 
 [image]
 detector = "auto"                # "auto" | "opencv"

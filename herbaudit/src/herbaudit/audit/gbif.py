@@ -145,6 +145,24 @@ def smart_get(field, frag, verb, occ):
 
 _GBIF_FUZZY_CACHE: dict = {}
 _GBIF_FUZZY_HEADERS = {"User-Agent": "HerbAudit/1.0 (herbarium specimen evaluation)"}
+_GBIF_SPECIES_MATCH_RAW: dict = {}
+
+
+def gbif_species_match(name: str, **params):
+    """GBIF species/match response for *name* (plus extra query *params*), cached per request
+    so the name check and the BDQ tests share one lookup. None on a network failure (not cached)."""
+    key = (name, tuple(sorted(params.items())))
+    if key not in _GBIF_SPECIES_MATCH_RAW:
+        try:
+            _GBIF_SPECIES_MATCH_RAW[key] = _gbif_get(
+                "https://api.gbif.org/v1/species/match",
+                params={"name": name, **params},
+                headers=_GBIF_FUZZY_HEADERS,
+                timeout=10,
+            ).json()
+        except Exception:
+            return None
+    return _GBIF_SPECIES_MATCH_RAW[key]
 
 
 def _gbif_fuzzy_resolve(name: str):
@@ -161,14 +179,8 @@ def _gbif_fuzzy_resolve(name: str):
     if clean in _GBIF_FUZZY_CACHE:
         return _GBIF_FUZZY_CACHE[clean]
 
-    try:
-        r = _gbif_get(
-            "https://api.gbif.org/v1/species/match",
-            params={"name": clean, "fuzzy": "true"},
-            headers=_GBIF_FUZZY_HEADERS,
-            timeout=10,
-        ).json()
-    except Exception:
+    r = gbif_species_match(clean, fuzzy="true")
+    if r is None:
         # Don't cache a transient network failure as a permanent "no match".
         return None, None, 0.0
 
