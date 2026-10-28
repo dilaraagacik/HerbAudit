@@ -104,6 +104,47 @@ herbaudit ./scans --model gemini-2.5-flash --detector opencv   # skip the YOLO d
 
 Run `herbaudit --help` for the full flag reference.
 
+## BDQ data quality tests
+
+With `--bdq_test` (or `bdq_test = true` under `[report]` in the config),
+HerbAudit also runs the [TDWG BDQ](https://bdq.tdwg.org/) (Biodiversity Data
+Quality) tests on each transcription. They need no reference record, so they
+also work with `--no-reference`. Without the flag nothing extra runs.
+
+```bash
+herbaudit ./scans --model gemini-3.5-flash-lite --bdq_test
+```
+
+37 tests run on every specimen, in these groups: date of collection,
+identification, taxon and name, type status, and location, coordinates and
+elevation. Each one follows its official specification, and the result is one
+of:
+
+- **PASS** or **FAIL** for validations, such as "is the date a valid ISO 8601
+  date" or "do the coordinates lie inside the stated country".
+- **Fix proposed** or **no change** for amendments, such as a date written in
+  another format, or coordinates whose sign or order looks wrong.
+- **Measured** for measures (the length of the event date).
+- **Can't run** when a test needs a value that is empty or cannot be read.
+
+The results go to two extra sheets in the Excel export (`BDQ Summary`, one row
+per specimen, and `BDQ`, one row per specimen and test), and to a separate
+`..._bdq.html` report with the tests grouped by category.
+
+Things to know:
+
+- Name tests (`SCIENTIFICNAME_FOUND`, `TAXON_UNAMBIGUOUS` and others) use the
+  GBIF Backbone and reuse the lookups the audit already makes, so they add few
+  extra requests.
+- Country and coordinate tests use bundled Natural Earth borders
+  (`herbaudit/audit/files/countries.json.gz`). These are **land borders only**,
+  so a point just off the coast can fail wrongly. HerbAudit does not extract a
+  country code, so it is looked up from the country name; names that do not
+  match exactly (for example "Zaire") give "can't run".
+- The amendments only propose a fix. Nothing in the transcription is changed.
+- Specimens with a failing test are opened in the HTML report. Tick "only
+  failures" to hide the rest.
+
 ## Reference data and annotations
 
 By default each specimen is checked against its GBIF record, matched by the
