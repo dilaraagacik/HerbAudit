@@ -104,6 +104,15 @@ herbaudit ./scans --model gemini-2.5-flash --detector opencv   # skip the YOLO d
 
 Run `herbaudit --help` for the full flag reference.
 
+## Example output
+
+The HTML report opens with a summary of the whole run: the mean accuracy, how
+many specimens scored as excellent, acceptable or poor, and the accuracy for
+each field. Below it, every specimen has its own card that compares the
+transcription with the reference field by field, next to the specimen image.
+
+<p align="center"><img src="assets/example_report.png" width="800" alt="HerbAudit evaluation report: summary of a run on 90 specimens"></p>
+
 ## BDQ data quality tests
 
 With `--bdq_test` (or `bdq_test = true` under `[report]` in the config),
