@@ -305,7 +305,7 @@ def build_label_collage_yolo(
     # Sort top-to-bottom, left-to-right (same as OpenCV collage)
     crops.sort(key=lambda c: (c[0] // 100, c[1]))
 
-    print(f"  LeafMachine2 detected {len(crops)} region(s)")
+    log.info(f"  LeafMachine2 detected {len(crops)} region(s)")
     return _pack_crops_mosaic([crop for _, _, _, _, crop in crops], collage_width)
 
 
@@ -409,5 +409,5 @@ def build_label_collage_ultralytics(
 
     crops.sort(key=lambda c: (c[0] // 100, c[1]))
 
-    print(f"  ultralytics detected {len(crops)} region(s)")
+    log.info(f"  ultralytics detected {len(crops)} region(s)")
     return _pack_crops_mosaic([crop for _, _, _, _, crop in crops], collage_width)

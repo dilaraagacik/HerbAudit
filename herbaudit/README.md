@@ -132,6 +132,35 @@ Things to know:
 - Specimens with a failing test are opened in the HTML report. Tick "only
   failures" to hide the rest.
 
+## Changing the prompt
+
+The instructions sent to the model are a YAML file, so you can edit them without
+touching any code. It holds the general instructions (`instructions`) and **one
+rule for each field** (`fields`), for example how to write `eventDate`. Lines
+starting with `#` are comments and are not sent to the model. To use your own
+version, download the default and edit the copy:
+
+```bash
+mkdir -p ~/.herbaudit
+curl -L -o ~/.herbaudit/prompt.yaml \
+  https://raw.githubusercontent.com/dilaraagacik/HerbAudit/main/herbaudit/src/herbaudit/pipeline/prompt.yaml
+```
+
+HerbAudit uses `~/.herbaudit/prompt.yaml` when it exists, or any file named by
+the `HERBAUDIT_PROMPT` environment variable, and prints
+`Using custom prompt: <path>` when it does.
+
+The set of fields is fixed, because the evaluation and the BDQ tests rely on
+them. So `fields` must have exactly one rule for each of the 25 fields.
+HerbAudit checks the file when it starts and tells you what is wrong (a missing
+field, a misspelled name, invalid YAML) before anything runs. Keep the formats
+the evaluation and BDQ tests expect (ISO dates, decimal coordinates, whole
+meters, `Last,First` collector names, JSON only); the header of the file lists
+them.
+
+Results from different prompts are not comparable, so use `--output NAME` to
+keep the runs apart.
+
 ## Reference data and annotations
 
 By default each specimen is checked against its GBIF record, matched by the

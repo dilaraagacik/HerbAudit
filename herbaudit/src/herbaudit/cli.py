@@ -7,8 +7,15 @@ import time
 from pathlib import Path
 from dotenv import load_dotenv
 
-from herbaudit.audit.run import run_audit
-from herbaudit.pipeline.weights import _ensure_default_archival_weights
+try:
+    from herbaudit.audit.run import run_audit
+    from herbaudit.pipeline.weights import _ensure_default_archival_weights
+except ValueError as exc:       # a custom prompt file that does not load (see pipeline/schema.py)
+    if type(exc).__name__ != "PromptError":
+        raise
+    sys.exit(f"herbaudit: {exc}\n"
+             "The prompt comes from HERBAUDIT_PROMPT or ~/.herbaudit/prompt.yaml; fix that file, "
+             "or unset/remove it to use the built-in prompt.")
 
 try:
     import tomllib          # stdlib on Python 3.11+
@@ -149,7 +156,7 @@ def _print_help():
     row("--batch", "", "Use Gemini's Batch API instead of live calls — 50% of the per-token ")
 
     section("Logging")
-    row("--verbose", "", "Show detailed per-region detection logs (INFO level). ")
+    row("--verbose", "", "Show per-image details (detected regions, tokens, timing) next to the progress bar ")
 
     section("Example")
     print(f"  {_DG}${_X} {_G}herbaudit{_X}"
@@ -334,6 +341,10 @@ def main():
 
     # --output labels this run's output files so comparing runs doesn't overwrite the last one.
     output_tag = re.sub(r"[^A-Za-z0-9._-]+", "_", args.output).strip("_") if args.output else None
+
+    from herbaudit.pipeline.schema import PROMPT_SOURCE, _DEFAULT_PROMPT_FILE
+    if PROMPT_SOURCE != _DEFAULT_PROMPT_FILE:
+        print(f"Using custom prompt: {PROMPT_SOURCE}")
 
     t_start = time.perf_counter()
 

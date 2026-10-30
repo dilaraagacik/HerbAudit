@@ -6,6 +6,7 @@ HerbAudit code, not vendored.
 """
 import logging
 import sys
+import threading
 import warnings
 from pathlib import Path
 
@@ -58,12 +59,22 @@ __all__ = ["run_archival_detector"]
 
 _MODEL_CACHE: dict[str, torch.nn.Module] = {}
 
+# The audit prepares several images at once (a thread pool), and they all share this one model.
+# The model keeps per-input-size state inside it (the YOLO Detect layer caches its grid), so two
+# threads running different image shapes at the same time overwrite each other's state and fail
+# with "The size of tensor a (...) must match the size of tensor b (...)". One lock keeps the
+# model load and each forward pass to a single thread; reading and resizing images stays parallel.
+_LOAD_LOCK = threading.Lock()
+_FORWARD_LOCK = threading.Lock()
+
 
 def _load_model(weights: str, device: str = ""):
     key = f"{weights}::{device}"
     if key not in _MODEL_CACHE:
-        dev = select_device(device)
-        _MODEL_CACHE[key] = attempt_load(weights, map_location=dev)
+        with _LOAD_LOCK:
+            if key not in _MODEL_CACHE:          # another thread may have loaded it while this one waited
+                dev = select_device(device)
+                _MODEL_CACHE[key] = attempt_load(weights, map_location=dev)
     return _MODEL_CACHE[key]
 
 
@@ -101,7 +112,7 @@ def run_archival_detector(
     if im_t.ndim == 3:
         im_t = im_t[None]
 
-    with torch.no_grad():
+    with _FORWARD_LOCK, torch.no_grad():
         pred = model(im_t)[0]
     pred = non_max_suppression(pred, conf_thres, iou_thres)
 

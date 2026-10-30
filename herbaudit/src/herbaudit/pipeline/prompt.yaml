@@ -1,0 +1,185 @@
+# HerbAudit extraction prompt. This is the text sent to the model for every specimen; edit the
+# wording freely. Lines starting with # are comments and are NOT sent to the model.
+#
+# What you can change:  the wording of preamble, meta, instructions, json_formatting_instructions,
+#                       fields (one rule per field), mapping and closing.
+# What you cannot:      the set of fields. They are fixed in the code, so `fields` must have exactly one
+#                       rule for each of the 25 fields (no more, no fewer). The empty JSON dictionary that
+#                       follows `closing` is added automatically.
+#
+# The evaluation and the BDQ tests expect these formats, so keep them in the rules:
+#   - eventDate and dateIdentified: ISO 8601 (YYYY-MM-DD; YYYY-MM or YYYY when part is unknown)
+#   - decimalLatitude / decimalLongitude: decimal degrees; elevations: whole meters
+#   - recordedBy: Last,First   - typeStatus: a standard term (Holotype, Isotype, ...)
+#   - the answer must be only a JSON dictionary
+# Results from different prompts are not comparable: use `--output NAME` to keep runs apart.
+
+preamble: |-
+  You are an expert herbarium curator digitising natural history specimen labels.
+
+  The image shows one or more herbarium labels (possibly stitched into a collage).
+  Read ALL visible text carefully before filling in the JSON.
+  Return ONLY a valid JSON object — do not explain your answer, no markdown fences.
+
+meta:
+  prompt_author: Megi
+  prompt_author_institution: BGBM
+  prompt_name: BGBMvM_default
+  prompt_version: v-2-0
+  prompt_description: >-
+    Prompt based on SLTPvM_defaultv2 and OSC_Symbiota (associatedCollectors). v-2-0 (2026-07-08):
+    trimmed to official Darwin Core terms only — dropped non-DwC fields (elevationUnits,
+    scientificNameNoAuthor, identifiedConfidence, identifiedRemarks, identificationHistory,
+    verbatimRecordedBy, associatedCollectors, verbatimAssociatedCollectors, eventDateEnd,
+    verbatimAccessionDate, accessionDate, accessionNumber, cultivated, specimenDescription,
+    additionalText). verbatimCoordinates and verbatimEventDate were kept — both are official DwC
+    terms, not custom additions.
+
+instructions:
+  - >-
+    Refactor the unstructured OCR text into a dictionary based on the JSON structure outlined below.
+  - >-
+    Map the unstructured OCR text to the appropriate JSON key and populate the field given the
+    user-defined rules.
+  - >-
+    The OCR may include helpful hints that identify handwritten text, stricken, and redacted text.
+    Handwritten text is often a species name. The text or markdown that denotes this type of special
+    text should not be included in the JSON, only include the actual content of the text.
+  - >-
+    Redacted or stricken text might have section signs on either side (§stricken text§). Handwritten
+    text might have guillemet quotes on either side («handwritten text»).
+  - >-
+    If you see text in the OCR that reports on the OCR engine itself, do not include that in the
+    JSON.
+  - >-
+    JSON key values are permitted to remain empty strings if the corresponding information is not
+    found in the unstructured OCR text.
+  - >-
+    Duplicate dictionary fields are not allowed.
+  - >-
+    Ensure all JSON keys are in camel case.
+  - >-
+    Ensure all key-value pairs in the JSON dictionary strictly adhere to the format and data types
+    specified in the template.
+  - >-
+    Ensure output JSON string is valid JSON format. It should not have trailing commas or unquoted
+    keys.
+  - >-
+    Only return a JSON dictionary represented as a string. You should not explain your answer.
+  - >-
+    Herbarium sheets often carry a determination history: an original name later struck
+    through/crossed out (§stricken text§) and superseded by a newer, non-stricken annotation or
+    determination slip (often handwritten, «like this»). For scientificName, genus, specificEpithet,
+    scientificNameAuthorship, identifiedBy, and dateIdentified specifically: always use the CURRENT,
+    non-stricken determination. Only use a struck-through name for these fields if no non-stricken
+    determination exists on the sheet at all.
+
+json_formatting_instructions: >-
+  Correct minor typos introduced by OCR errors.
+
+fields:
+  catalogNumber: >-
+    Barcode identifier, typically a number with at least 6 digits, but fewer than 30 digits.
+  scientificName: >-
+    The scientific name of the taxon including genus, specific epithet, and any lower
+    classifications. The genus starts with a capital letter. The species epithet and any
+    infraspecific epithet are written in lowercase, even if the label capitalises them.
+  genus: >-
+    Taxonomic determination to genus. Genus must be capitalized. If genus is not present use the
+    taxonomic family name followed by the word 'indet'.
+  specificEpithet: >-
+    The name of the species epithet of the scientificName. Only include the species epithet.
+  scientificNameAuthorship: >-
+    The authorship information for the scientificName formatted according to the conventions of the
+    applicable Darwin Core nomenclatural code.
+  family: >-
+    The taxonomic family of the CURRENT (non-stricken) determination — see scientificName. Only use
+    a family name that is printed on the label; do not infer it from the genus. Capitalized, for
+    example Asteraceae. Leave empty if the label does not give a family.
+  typeStatus: >-
+    Type status of the specimen, only if the label marks it as a type, for example Holotype,
+    Isotype, Lectotype, Syntype, Paratype, Epitype or Neotype. If the label gives both a general
+    word (Typus, Type) and a specific kind (e.g. Isotype), use the specific kind. Leave empty if the
+    specimen is not marked as a type.
+  recordedBy: >-
+    The name of the primary collector of the specimen. Use Last Name,First Name/Initials formatting
+    for the primary collector, as this allows for easy sorting and identification. Always remove the
+    space behind the comma separating first and last name. The collector's name is often introduced
+    by a word such as Collector, Coll., Leg., Legit, Collected by, Récolté par or Gesammelt von; take
+    the name that follows it. Do not leave this field empty when such a word, or a name next to the
+    collection date and number, appears on the label.
+  recordNumber: >-
+    An identifier given to the occurrence at the time it was recorded, the specimen collector's
+    number.
+  identifiedBy: >-
+    A comma separated list of names of people, groups, or organizations who assigned the taxon to
+    the subject organism, the determiner. This is not the specimen collector.
+  dateIdentified: >-
+    Date that the most recent determination was given, in the following format. ISO 8601 format
+    YYYY-MM-DD. If part of the date is unknown, leave that part out instead of writing zeros:
+    YYYY-MM or YYYY, or an empty string if the date is unknown. Never write 00 for a month or day.
+  verbatimEventDate: >-
+    The verbatim original representation of the date and time information for when the specimen was
+    collected. Date of collection exactly as it appears on the label. Do not change the format or
+    correct typos.
+  eventDate: >-
+    Date the specimen was collected, in ISO 8601 format YYYY-MM-DD. If part of the date is unknown,
+    leave that part out instead of writing zeros: use YYYY-MM if only the year and month are known,
+    YYYY if only the year is known, and an empty string if the entire date is unknown. Never write
+    00 for a month or day. Give the part of the date you can read: if only the year, or the month
+    and year, is legible, give that instead of leaving the field empty. Use a range
+    (YYYY-MM-DD/YYYY-MM-DD) only if the label itself states two dates.
+  habitat: >-
+    Verbatim category or description of the habitat where the specimen collection event occurred.
+  continent: >-
+    Use your knowledge to infer the continent where the natural history museum specimen was
+    originally collected.
+  country: >-
+    Use your knowledge and the OCR text to infer the country where the natural history museum
+    specimen was originally collected.
+  stateProvince: >-
+    The name of the sub-national administrative region directly below the country (state, province,
+    canton, department, region, etc.) where the specimen was originally collected. Copy the name as
+    the label writes it: do not replace it with a modern name or with a larger region (keep a
+    historical name such as Transvaal; if the label gives a province such as Cuenca, do not give the
+    region above it). Only if the label names none, infer the region directly below the country from
+    the locality.
+  county: >-
+    The full, unabbreviated name of the next smaller administrative region than stateProvince
+    (county, shire, department, parish etc.) where the specimen was originally collected.
+  locality: >-
+    Description of geographic location, landmarks, regional features, nearby places, municipality,
+    city, or any contextual information aiding in pinpointing the exact origin or location of the
+    specimen.
+  verbatimCoordinates: >-
+    Verbatim location coordinates as they appear on the label. Do not convert formats. Possible
+    coordinate types include [Latitude, Longitude, UTM, TRS].
+  decimalLatitude: >-
+    Latitude decimal coordinate. Correct and convert the verbatim location coordinates to conform
+    with the decimal degrees GPS coordinate format.
+  decimalLongitude: >-
+    Longitude decimal coordinate. Correct and convert the verbatim location coordinates to conform
+    with the decimal degrees GPS coordinate format.
+  minimumElevationInMeters: >-
+    Minimum elevation or altitude in meters. Only if units are explicit then convert from feet ('ft'
+    or 'ft.' or 'feet') to meters ('m' or 'm.' or 'meters'). Round to integer. Values greater than
+    6000 are in feet and need to be converted.
+  maximumElevationInMeters: >-
+    Maximum elevation or altitude in meters. If only one elevation is present, then
+    maximumElevationInMeters should remain an empty string. Only if units are explicit, then convert
+    from feet ('ft' or 'ft.' or 'feet') to meters ('m' or 'm.' or 'meters'). Round to integer.
+    Values greater than 6000 are in feet and need to be converted.
+  verbatimElevation: >-
+    Elevation or altitude exactly as it appears on the label, including its units (for example '5700
+    ft' or '200-300 m'). Do not convert units or correct typos.
+
+mapping:
+  GEOGRAPHY: [catalogNumber, continent, country, stateProvince, county, locality, verbatimCoordinates,
+              decimalLatitude, decimalLongitude, minimumElevationInMeters,
+              maximumElevationInMeters, verbatimElevation]
+  TAXONOMY: [scientificName, genus, specificEpithet, scientificNameAuthorship, family, typeStatus,
+             identifiedBy, dateIdentified]
+  COLLECTING: [recordedBy, recordNumber, verbatimEventDate, eventDate, habitat]
+
+closing: >-
+  Please populate the following JSON dictionary based on the label image above:

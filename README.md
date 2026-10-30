@@ -154,6 +154,44 @@ Things to know:
 - Specimens with a failing test are opened in the HTML report. Tick "only
   failures" to hide the rest.
 
+## Changing the prompt
+
+The instructions sent to the model are a YAML file, so you can edit them without
+touching any code: [`herbaudit/src/herbaudit/pipeline/prompt.yaml`](herbaudit/src/herbaudit/pipeline/prompt.yaml).
+With `pip install -e ./herbaudit` a change applies on the next run. The file has
+these sections:
+
+| Section | What it is |
+|---|---|
+| `preamble`, `closing` | The text before and after the rules |
+| `meta` | Name, author and version of the prompt |
+| `instructions` | The numbered general instructions |
+| `fields` | **One rule for each field**, for example how to write `eventDate` |
+| `mapping` | The fields grouped into geography, taxonomy and collecting |
+
+Lines starting with `#` are comments and are not sent to the model. The empty
+JSON dictionary that the model fills in is added automatically after `closing`.
+
+The set of fields is fixed in `pipeline/schema.py`, because the evaluation and
+the BDQ tests rely on them. So `fields` must have exactly one rule for each of
+the 25 fields. HerbAudit checks the file when it starts and tells you what is
+wrong (a missing field, a misspelled name, invalid YAML) before anything runs.
+Keep the formats the evaluation and BDQ tests expect (ISO dates, decimal
+coordinates, whole meters, `Last,First` collector names, JSON only); the header
+of the file lists them.
+
+To use your own prompt without editing the package, put a copy at
+`~/.herbaudit/prompt.yaml`, or point to any file with the `HERBAUDIT_PROMPT`
+environment variable. HerbAudit then prints `Using custom prompt: <path>`.
+
+```bash
+cp herbaudit/src/herbaudit/pipeline/prompt.yaml ~/.herbaudit/prompt.yaml   # then edit the copy
+HERBAUDIT_PROMPT=./my_prompt.yaml herbaudit ./scans --model gemini-3.5-flash-lite
+```
+
+Results from different prompts are not comparable, so use `--output NAME` to
+keep the runs apart.
+
 ## Reference data and annotations
 
 By default each specimen is checked against its GBIF record, matched by the

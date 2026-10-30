@@ -196,7 +196,7 @@ class HerbAudit:
                 in_tok, out_tok = self._gemini_usage_tokens(usage)
                 thought_tok = getattr(usage, "thoughts_token_count", 0) or 0
                 self._last_thinking_tok = thought_tok
-                print(f"  Single-pass OK — in={in_tok} out={out_tok}"
+                log.info(f"  Single-pass OK — in={in_tok} out={out_tok}"
                       f"{f' (incl. {thought_tok} thinking)' if thought_tok else ''} temp={temperature:.1f}")
                 return parsed, in_tok, out_tok
             except json.JSONDecodeError as exc:
@@ -274,7 +274,7 @@ class HerbAudit:
                 out_tok = resp.usage.completion_tokens if resp.usage else 0
                 _details = getattr(resp.usage, "completion_tokens_details", None) if resp.usage else None
                 self._last_thinking_tok = getattr(_details, "reasoning_tokens", 0) or 0
-                print(f"  Parsed OK — tokens in={in_tok} out={out_tok}")
+                log.info(f"  Parsed OK — tokens in={in_tok} out={out_tok}")
                 return parsed, in_tok, out_tok
 
             except json.JSONDecodeError as exc:
@@ -390,7 +390,7 @@ class HerbAudit:
                 collage     = cv2.resize(collage, (img_w, img_h), interpolation=cv2.INTER_AREA)
                 _, buf      = cv2.imencode(".png", collage)
                 image_bytes = buf.tobytes()
-                log.warning("Collage > 10 MB — resized to %dx%d (%d KB)", img_w, img_h, len(image_bytes)//1024)
+                log.info("Collage > 10 MB — resized to %dx%d (%d KB)", img_w, img_h, len(image_bytes)//1024)
             mime_type    = "image/png"
             collage_used = True
         else:
@@ -429,7 +429,7 @@ class HerbAudit:
         pipeline_label = {
             "gemini": "GEMINI 1-PASS", "openai": "OPENAI 1-PASS", "ollama": "OLLAMA 1-PASS",
         }[pipeline]
-        print(f"  {pipeline_label} ← {display_name}  [collage={collage_used}  {img_w}×{img_h}px  {len(image_bytes)//1024}KB]")
+        log.info(f"  {pipeline_label} ← {display_name}  [collage={collage_used}  {img_w}×{img_h}px  {len(image_bytes)//1024}KB]")
 
         try:
             if pipeline == "gemini":
@@ -840,6 +840,9 @@ class HerbAudit:
                     cached[p] = data
         n_cached = len(cached)
 
+        # The progress bar is always shown. The per-image detail lines (detected regions, tokens, timing)
+        # go to the log and appear with --verbose (logging at INFO); errors and the summary always show.
+        verbose = log.isEnabledFor(logging.INFO)
         bar = _tqdm(
             images,
             total   = n_total,
@@ -873,7 +876,7 @@ class HerbAudit:
             if img_path in cached:
                 if _tqdm:
                     bar.set_postfix_str(f"cached: {img_path.name}", refresh=True)
-                else:
+                elif verbose:
                     print(f"  ↩ Cached: {img_path.name}")
                 log.info("Skip (exists): %s", img_path.name)
                 self.results.append(cached[img_path])
@@ -883,7 +886,7 @@ class HerbAudit:
 
             if _tqdm:
                 bar.set_postfix_str(img_path.name[:40], refresh=True)
-            else:
+            elif verbose:
                 n_done = len(self.results)
                 print(f"  [{n_done+1}/{n_total}] {img_path.name}")
 
@@ -902,7 +905,7 @@ class HerbAudit:
                 if _tqdm:
                     bar.set_postfix_str(
                         f"{img_path.name[:30]} done {elapsed:.1f}s", refresh=True)
-                else:
+                elif verbose:
                     print(f" {elapsed:.1f}s")
 
             except Exception as exc:

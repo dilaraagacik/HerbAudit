@@ -1,39 +1,28 @@
-"""Darwin Core schema, field-alias normalization, and the single-pass extraction prompt built from it."""
+"""Darwin Core field list, field-alias normalization, and the single-pass extraction prompt (prompt.yaml)."""
 from __future__ import annotations
 
 import json
+import os
+from pathlib import Path
+
+import yaml
 
 
-HERBARIUM_SCHEMA: dict[str, str] = {
-    # Geography — all official Darwin Core terms
-    "catalogNumber":             "Barcode identifier, typically a number with at least 6 digits, but fewer than 30 digits.",
-    "continent":                 "Use your knowledge to infer the continent where the natural history museum specimen was originally collected.",
-    "country":                   "Use your knowledge and the OCR text to infer the country where the natural history museum specimen was originally collected.",
-    "stateProvince":             "The name of the sub-national administrative region than country (state, province, canton, department, region, etc.) where the specimen was originally collected.",
-    "county":                    "The full, unabbreviated name of the next smaller administrative region than stateProvince (county, shire, department, parish etc.) where the specimen was originally collected.",
-    "locality":                  "Description of geographic location, landmarks, regional features, nearby places, municipality, city, or any contextual information aiding in pinpointing the exact origin or location of the specimen.",
-    "verbatimCoordinates":       "Verbatim location coordinates as they appear on the label. Do not convert formats. Possible coordinate types include [Latitude, Longitude, UTM, TRS].",
-    "decimalLatitude":           "Latitude decimal coordinate. Correct and convert the verbatim location coordinates to conform with the decimal degrees GPS coordinate format.",
-    "decimalLongitude":          "Longitude decimal coordinate. Correct and convert the verbatim location coordinates to conform with the decimal degrees GPS coordinate format.",
-    "minimumElevationInMeters":  "Minimum elevation or altitude in meters. Only if units are explicit then convert from feet ('ft' or 'ft.' or 'feet') to meters ('m' or 'm.' or 'meters'). Round to integer. Values greater than 6000 are in feet and need to be converted.",
-    "maximumElevationInMeters":  "Maximum elevation or altitude in meters. If only one elevation is present, then maximumElevationInMeters should remain an empty string. Only if units are explicit, then convert from feet ('ft' or 'ft.' or 'feet') to meters ('m' or 'm.' or 'meters'). Round to integer. Values greater than 6000 are in feet and need to be converted.",
-    "verbatimElevation":         "Elevation or altitude exactly as it appears on the label, including its units (for example '5700 ft' or '200-300 m'). Do not convert units or correct typos.",
-    # Taxonomy — all official Darwin Core terms
-    "scientificName":            "The scientific name of the taxon including genus, specific epithet, and any lower classifications. Herbarium sheets often carry a determination history — an original name later struck through/crossed out and superseded by a newer (often handwritten) annotation or determination slip. Always use the CURRENT, non-stricken determination; never a struck-through name, unless no non-stricken determination exists on the sheet at all. The genus starts with a capital letter. The species epithet and any infraspecific epithet are written in lowercase, even if the label capitalises them.",
-    "genus":                     "Taxonomic determination to genus, from the CURRENT (non-stricken) determination — see scientificName. Genus must be capitalized. If genus is not present use the taxonomic family name followed by the word 'indet'.",
-    "specificEpithet":           "The name of the species epithet of the scientificName, from the CURRENT (non-stricken) determination — see scientificName. Only include the species epithet.",
-    "scientificNameAuthorship":  "The authorship information for the scientificName, from the CURRENT (non-stricken) determination — see scientificName. Formatted according to the conventions of the applicable Darwin Core nomenclatural code.",
-    "family":                   "The taxonomic family of the CURRENT (non-stricken) determination — see scientificName. Only use a family name that is printed on the label; do not infer it from the genus. Capitalized, for example Asteraceae. Leave empty if the label does not give a family.",
-    "typeStatus":               "Type status of the specimen, only if the label marks it as a type, for example Holotype, Isotype, Lectotype, Syntype, Paratype, Epitype or Neotype. If the label gives both a general word (Typus, Type) and a specific kind (e.g. Isotype), use the specific kind. Leave empty if the specimen is not marked as a type.",
-    "identifiedBy":              "A comma separated list of names of people, groups, or organizations who assigned the CURRENT (non-stricken) taxon determination to the subject organism — see scientificName. This is not the specimen collector.",
-    "dateIdentified":            "Date that the CURRENT (non-stricken) determination was given — see scientificName. ISO 8601 format YYYY-MM-DD. If part of the date is unknown, leave that part out instead of writing zeros: YYYY-MM or YYYY, or an empty string if the date is unknown. Never write 00 for a month or day.",
-    # Collecting — all official Darwin Core terms
-    "recordedBy":                "The name of the primary collector of the specimen. Use Last Name,First Name/Initials formatting for the primary collector — this allows for easy sorting and identification. Always remove the space behind the comma separating first and last name.",
-    "recordNumber":              "An identifier given to the occurrence at the time it was recorded, the specimen collector's number.",
-    "verbatimEventDate":         "The verbatim original representation of the date and time information for when the specimen was collected. Date of collection exactly as it appears on the label. Do not change the format or correct typos.",
-    "eventDate":                 "Date the specimen was collected, in ISO 8601 format YYYY-MM-DD. If part of the date is unknown, leave that part out instead of writing zeros: use YYYY-MM if only the year and month are known, YYYY if only the year is known, and an empty string if the entire date is unknown. Never write 00 for a month or day.",
-    "habitat":                   "Verbatim category or description of the habitat where the specimen collection event occurred.",
-}
+# The fields HerbAudit extracts (all official Darwin Core terms), in the order of the JSON the model returns.
+# They are fixed here because the evaluation and the BDQ tests rely on them; the wording of the
+# prompt, including the rule for each field, is in prompt.yaml.
+_FIELDS: tuple[str, ...] = (
+    # Geography
+    "catalogNumber", "continent", "country", "stateProvince",
+    "county", "locality", "verbatimCoordinates", "decimalLatitude",
+    "decimalLongitude", "minimumElevationInMeters", "maximumElevationInMeters", "verbatimElevation",
+    # Taxonomy
+    "scientificName", "genus", "specificEpithet", "scientificNameAuthorship",
+    "family", "typeStatus", "identifiedBy", "dateIdentified",
+    # Collecting
+    "recordedBy", "recordNumber", "verbatimEventDate", "eventDate",
+    "habitat",
+)
 
 
 # Aliases: old / alternate field names → canonical schema keys
@@ -110,75 +99,92 @@ def _split_record(record: dict) -> dict:
     herbaudit_meta = {k: v for k, v in record.items() if k not in HERBARIUM_SCHEMA}
     return {"darwin_core": darwin_core, "herbaudit_meta": herbaudit_meta}
 
-
-_FIELD_DESC  = "\n".join(f'  "{k}": {v}' for k, v in HERBARIUM_SCHEMA.items())
-_FIELD_LIST  = ", ".join(f'"{k}"' for k in HERBARIUM_SCHEMA)
-_EMPTY_JSON  = json.dumps({k: "" for k in HERBARIUM_SCHEMA}, indent=2)
+_EMPTY_JSON = json.dumps({k: "" for k in _FIELDS}, indent=2)
 
 
-_RULES_BLOCK = """\
-prompt_author: Megi
-prompt_author_institution: BGBM
-prompt_name: BGBMvM_default
-prompt_version: v-2-0
-prompt_description: Prompt based on SLTPvM_defaultv2 and OSC_Symbiota (associatedCollectors). v-2-0 (2026-07-08): trimmed to official Darwin Core terms only — dropped non-DwC fields (elevationUnits, scientificNameNoAuthor, identifiedConfidence, identifiedRemarks, identificationHistory, verbatimRecordedBy, associatedCollectors, verbatimAssociatedCollectors, eventDateEnd, verbatimAccessionDate, accessionDate, accessionNumber, cultivated, specimenDescription, additionalText). verbatimCoordinates and verbatimEventDate were kept — both are official DwC terms, not custom additions.
+# --- The extraction prompt: prompt.yaml ---------------------------------------------------
+# The prompt is a YAML file so it can be edited without touching the code. This reads it, checks
+# it, and writes it out as the text the model receives. The fields themselves are fixed in
+# _FIELDS above, so a prompt cannot add, drop or rename a field.
 
-instructions:
-1. Refactor the unstructured OCR text into a dictionary based on the JSON structure outlined below.
-2. Map the unstructured OCR text to the appropriate JSON key and populate the field given the user-defined rules.
-3. The OCR may include helpful hints that identify handwritten text, stricken, and redacted text. Handwritten text is often a species name. The text or markdown that denotes this type of special text should not be included in the JSON, only include the actual content of the text.
-4. Redacted or stricken text might have section signs on either side (§stricken text§). Handwritten text might have guillemet quotes on either side («handwritten text»).
-5. If you see text in the OCR that reports on the OCR engine itself, do not include that in the JSON.
-6. JSON key values are permitted to remain empty strings if the corresponding information is not found in the unstructured OCR text.
-7. Duplicate dictionary fields are not allowed.
-8. Ensure all JSON keys are in camel case.
-9. Ensure all key-value pairs in the JSON dictionary strictly adhere to the format and data types specified in the template.
-10. Ensure output JSON string is valid JSON format. It should not have trailing commas or unquoted keys.
-11. Only return a JSON dictionary represented as a string. You should not explain your answer.
-12. Herbarium sheets often carry a determination history: an original name later struck through/crossed out (§stricken text§) and superseded by a newer, non-stricken annotation or determination slip (often handwritten, «like this»). For scientificName, genus, specificEpithet, scientificNameAuthorship, identifiedBy, and dateIdentified specifically: always use the CURRENT, non-stricken determination. Only use a struck-through name for these fields if no non-stricken determination exists on the sheet at all.
+class PromptError(ValueError):
+    """The prompt file is missing or not valid."""
 
-json_formatting_instructions: Correct minor typos introduced by OCR errors.
-rules:
-  catalogNumber: Barcode identifier, typically a number with at least 6 digits, but fewer than 30 digits.
-  scientificName: The scientific name of the taxon including genus, specific epithet, and any lower classifications. The genus starts with a capital letter. The species epithet and any infraspecific epithet are written in lowercase, even if the label capitalises them.
-  genus: Taxonomic determination to genus. Genus must be capitalized. If genus is not present use the taxonomic family name followed by the word 'indet'.
-  specificEpithet: The name of the species epithet of the scientificName. Only include the species epithet.
-  scientificNameAuthorship: The authorship information for the scientificName formatted according to the conventions of the applicable Darwin Core nomenclatural code.
-  family: The taxonomic family of the CURRENT (non-stricken) determination — see scientificName. Only use a family name that is printed on the label; do not infer it from the genus. Capitalized, for example Asteraceae. Leave empty if the label does not give a family.
-  typeStatus: Type status of the specimen, only if the label marks it as a type, for example Holotype, Isotype, Lectotype, Syntype, Paratype, Epitype or Neotype. If the label gives both a general word (Typus, Type) and a specific kind (e.g. Isotype), use the specific kind. Leave empty if the specimen is not marked as a type.
-  recordedBy: The name of the primary collector of the specimen. Use Last Name,First Name/Initials formatting for the primary collector, as this allows for easy sorting and identification. Always remove the space behind the comma separating first and last name.
-  recordNumber: An identifier given to the occurrence at the time it was recorded, the specimen collector's number.
-  identifiedBy: A comma separated list of names of people, groups, or organizations who assigned the taxon to the subject organism, the determiner. This is not the specimen collector.
-  dateIdentified: Date that the most recent determination was given, in the following format. ISO 8601 format YYYY-MM-DD. If part of the date is unknown, leave that part out instead of writing zeros: YYYY-MM or YYYY, or an empty string if the date is unknown. Never write 00 for a month or day.
-  verbatimEventDate: The verbatim original representation of the date and time information for when the specimen was collected. Date of collection exactly as it appears on the label. Do not change the format or correct typos.
-  eventDate: Date the specimen was collected, in ISO 8601 format YYYY-MM-DD. If part of the date is unknown, leave that part out instead of writing zeros: use YYYY-MM if only the year and month are known, YYYY if only the year is known, and an empty string if the entire date is unknown. Never write 00 for a month or day.
-  habitat: Verbatim category or description of the habitat where the specimen collection event occurred.
-  continent: Use your knowledge to infer the continent where the natural history museum specimen was originally collected.
-  country: Use your knowledge and the OCR text to infer the country where the natural history museum specimen was originally collected.
-  stateProvince: The name of the sub-national administrative region than country (state, province, canton, department, region, etc.) where the specimen was originally collected.
-  county: The full, unabbreviated name of the next smaller administrative region than stateProvince (county, shire, department, parish etc.) where the specimen was originally collected.
-  locality: Description of geographic location, landmarks, regional features, nearby places, municipality, city, or any contextual information aiding in pinpointing the exact origin or location of the specimen.
-  verbatimCoordinates: Verbatim location coordinates as they appear on the label. Do not convert formats. Possible coordinate types include [Latitude, Longitude, UTM, TRS].
-  decimalLatitude: Latitude decimal coordinate. Correct and convert the verbatim location coordinates to conform with the decimal degrees GPS coordinate format.
-  decimalLongitude: Longitude decimal coordinate. Correct and convert the verbatim location coordinates to conform with the decimal degrees GPS coordinate format.
-  minimumElevationInMeters: Minimum elevation or altitude in meters. Only if units are explicit then convert from feet ('ft' or 'ft.' or 'feet') to meters ('m' or 'm.' or 'meters'). Round to integer. Values greater than 6000 are in feet and need to be converted.
-  maximumElevationInMeters: Maximum elevation or altitude in meters. If only one elevation is present, then maximumElevationInMeters should remain an empty string. Only if units are explicit, then convert from feet ('ft' or 'ft.' or 'feet') to meters ('m' or 'm.' or 'meters'). Round to integer. Values greater than 6000 are in feet and need to be converted.
-  verbatimElevation: Elevation or altitude exactly as it appears on the label, including its units (for example '5700 ft' or '200-300 m'). Do not convert units or correct typos.
 
-mapping:
-  GEOGRAPHY: [catalogNumber, continent, country, stateProvince, county, locality, verbatimCoordinates, decimalLatitude, decimalLongitude, minimumElevationInMeters, maximumElevationInMeters, verbatimElevation]
-  TAXONOMY: [scientificName, genus, specificEpithet, scientificNameAuthorship, family, typeStatus, identifiedBy, dateIdentified]
-  COLLECTING: [recordedBy, recordNumber, verbatimEventDate, eventDate, habitat]
-"""
+_DEFAULT_PROMPT_FILE = Path(__file__).with_name("prompt.yaml")
+_USER_PROMPT_FILE = Path.home() / ".herbaudit" / "prompt.yaml"
+
+
+def _prompt_file() -> Path:
+    """HERBAUDIT_PROMPT if set, else ~/.herbaudit/prompt.yaml if it exists, else the packaged prompt.yaml."""
+    env = os.environ.get("HERBAUDIT_PROMPT")
+    if env:
+        return Path(env).expanduser()
+    return _USER_PROMPT_FILE if _USER_PROMPT_FILE.is_file() else _DEFAULT_PROMPT_FILE
+
+
+def _text(data: dict, key: str, path: Path, required: bool = True) -> str | None:
+    value = data.get(key)
+    if value is None and not required:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise PromptError(f"{path}: '{key}' must be text")
+    return value.strip()
+
+
+def load_prompt(path: Path) -> tuple[str, dict[str, str]]:
+    """Read and check a prompt file. Returns the text sent to the model and the rule for each field."""
+    if not path.is_file():
+        raise PromptError(f"Prompt file not found: {path}")
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        raise PromptError(f"{path} is not valid YAML: {exc}") from None
+    if not isinstance(data, dict):
+        raise PromptError(f"{path}: expected the sections preamble, instructions, fields, mapping and closing")
+
+    preamble, closing = _text(data, "preamble", path), _text(data, "closing", path)
+    jfi = _text(data, "json_formatting_instructions", path, required=False)
+
+    instructions = data.get("instructions")
+    if not isinstance(instructions, list) or not instructions or not all(isinstance(i, str) and i.strip() for i in instructions):
+        raise PromptError(f"{path}: 'instructions' must be a list of texts")
+
+    rules = data.get("fields")
+    if not isinstance(rules, dict):
+        raise PromptError(f"{path}: 'fields' must list a rule for each field")
+    missing = [k for k in _FIELDS if k not in rules]
+    unknown = [k for k in rules if k not in _FIELDS]
+    if missing or unknown:
+        raise PromptError(f"{path}: 'fields' needs exactly the fields HerbAudit extracts"
+                          + (f"; missing: {', '.join(missing)}" if missing else "")
+                          + (f"; unknown: {', '.join(map(str, unknown))}" if unknown else ""))
+    empty = [k for k, v in rules.items() if not isinstance(v, str) or not v.strip()]
+    if empty:
+        raise PromptError(f"{path}: 'fields' has no rule text for: {', '.join(empty)}")
+    rules = {k: v.strip() for k, v in rules.items()}
+
+    mapping = data.get("mapping")
+    if not isinstance(mapping, dict) or not all(isinstance(v, list) and all(n in _FIELDS for n in v) for v in mapping.values()):
+        raise PromptError(f"{path}: 'mapping' must group field names, e.g. GEOGRAPHY: [catalogNumber, country]")
+
+    meta = data.get("meta")
+    if meta is not None and not isinstance(meta, dict):
+        raise PromptError(f"{path}: 'meta' must be a list of name: value pairs")
+
+    lines = [preamble, ""]
+    if meta:
+        lines += [f"{k}: {str(v).strip()}" for k, v in meta.items()] + [""]
+    lines += ["instructions:"] + [f"{n}. {i.strip()}" for n, i in enumerate(instructions, 1)] + [""]
+    if jfi:
+        lines.append(f"json_formatting_instructions: {jfi}")
+    lines += ["rules:"] + [f"  {k}: {v}" for k, v in rules.items()] + ["", "mapping:"]
+    lines += [f"  {group}: [{', '.join(names)}]" for group, names in mapping.items()]
+    lines += ["", closing, _EMPTY_JSON]
+    return "\n".join(lines), rules
 
 
 # Single vision-call prompt shared by every provider (Gemini, OpenAI, Ollama).
-SINGLE_PASS_PROMPT = (
-    "You are an expert herbarium curator digitising natural history specimen labels.\n\n"
-    "The image shows one or more herbarium labels (possibly stitched into a collage).\n"
-    "Read ALL visible text carefully before filling in the JSON.\n"
-    "Return ONLY a valid JSON object — do not explain your answer, no markdown fences.\n\n"
-    + _RULES_BLOCK
-    + "\nPlease populate the following JSON dictionary based on the label image above:\n"
-    + _EMPTY_JSON
-)
+PROMPT_SOURCE = _prompt_file()
+SINGLE_PASS_PROMPT, _RULES = load_prompt(PROMPT_SOURCE)
+HERBARIUM_SCHEMA: dict[str, str] = {k: _RULES[k] for k in _FIELDS}     # field -> its rule, in _FIELDS order
