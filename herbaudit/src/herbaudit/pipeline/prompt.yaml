@@ -104,10 +104,7 @@ fields:
   recordedBy: >-
     The name of the primary collector of the specimen. Use Last Name,First Name/Initials formatting
     for the primary collector, as this allows for easy sorting and identification. Always remove the
-    space behind the comma separating first and last name. The collector's name is often introduced
-    by a word such as Collector, Coll., Leg., Legit, Collected by, Récolté par or Gesammelt von; take
-    the name that follows it. Do not leave this field empty when such a word, or a name next to the
-    collection date and number, appears on the label.
+    space behind the comma separating first and last name.
   recordNumber: >-
     An identifier given to the occurrence at the time it was recorded, the specimen collector's
     number.
@@ -126,9 +123,7 @@ fields:
     Date the specimen was collected, in ISO 8601 format YYYY-MM-DD. If part of the date is unknown,
     leave that part out instead of writing zeros: use YYYY-MM if only the year and month are known,
     YYYY if only the year is known, and an empty string if the entire date is unknown. Never write
-    00 for a month or day. Give the part of the date you can read: if only the year, or the month
-    and year, is legible, give that instead of leaving the field empty. Use a range
-    (YYYY-MM-DD/YYYY-MM-DD) only if the label itself states two dates.
+    00 for a month or day.
   habitat: >-
     Verbatim category or description of the habitat where the specimen collection event occurred.
   continent: >-
@@ -138,12 +133,8 @@ fields:
     Use your knowledge and the OCR text to infer the country where the natural history museum
     specimen was originally collected.
   stateProvince: >-
-    The name of the sub-national administrative region directly below the country (state, province,
-    canton, department, region, etc.) where the specimen was originally collected. Copy the name as
-    the label writes it: do not replace it with a modern name or with a larger region (keep a
-    historical name such as Transvaal; if the label gives a province such as Cuenca, do not give the
-    region above it). Only if the label names none, infer the region directly below the country from
-    the locality.
+    The name of the sub-national administrative region than country (state, province, canton,
+    department, region, etc.) where the specimen was originally collected.
   county: >-
     The full, unabbreviated name of the next smaller administrative region than stateProvince
     (county, shire, department, parish etc.) where the specimen was originally collected.
