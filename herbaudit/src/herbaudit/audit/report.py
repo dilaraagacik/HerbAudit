@@ -5,7 +5,6 @@ HTML report building: image lookup, badges, per-specimen audit cards
 from __future__ import annotations
 
 import base64
-import math
 import os
 import re
 
@@ -15,12 +14,157 @@ from .text import clean_text, strip_authors, has_non_latin_script, transliterate
 from .geo import coord_accuracy, _haversine_km, _geocode_location
 from .scoring import get_accuracy, EXCLUDED_SENTINEL
 from .wfo import wfo_status_badge_html
+from .collectors import flag_badge_html
+
+
+_IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".webp")     # in order of preference
+_BROWSER_MIME = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png"}
+_REPORT_IMAGE_MAX = 1200     # longest side, in pixels, of an image converted for the report
+
+
+# Style and script that open a specimen image (class "zoomable") in a full-screen viewer: scroll wheel
+# or +/- to zoom, drag to move, double-click for 100%, Esc or the X to close. Plain string, not an f-string,
+# so the braces stay as they are; both report pages insert it with {IMAGE_VIEWER_HEAD}.
+IMAGE_VIEWER_HEAD = """
+  <style>
+    img.zoomable { cursor: zoom-in; }
+    #imgViewer { position: fixed; inset: 0; z-index: 10000; background: rgba(8,8,8,.94); overflow: hidden;
+                 touch-action: none; user-select: none; cursor: grab; }
+    #imgViewer.dragging { cursor: grabbing; }
+    #imgViewer img { position: absolute; top: 0; left: 0; transform-origin: 0 0; max-width: none; max-height: none;
+                     will-change: transform; -webkit-user-drag: none; }
+    #imgViewerBar { position: fixed; top: 12px; right: 16px; display: flex; gap: 6px; align-items: center; z-index: 10001; }
+    #imgViewerBar button { background: rgba(255,255,255,.14); color: #fff; border: 1px solid rgba(255,255,255,.25);
+                           border-radius: 8px; padding: 6px 12px; font: 600 13px system-ui, sans-serif; cursor: pointer; }
+    #imgViewerBar button:hover { background: rgba(255,255,255,.28); }
+    #imgViewerBar span { color: rgba(255,255,255,.7); font: 12px system-ui, sans-serif; margin-right: 8px; }
+    #imgViewerHint { position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%); color: rgba(255,255,255,.6);
+                     font: 12px system-ui, sans-serif; z-index: 10001; pointer-events: none; }
+  </style>
+  <script>
+    (function () {
+      var box, img, zoomLabel, fit = 1, s = 1, x = 0, y = 0, drag = null, moved = 0;
+      var MAX = 8;                                           /* up to 8 x the image's own pixels */
+      function build() {
+        box = document.createElement('div'); box.id = 'imgViewer'; box.style.display = 'none';
+        img = document.createElement('img'); box.appendChild(img);
+        var bar = document.createElement('div'); bar.id = 'imgViewerBar';
+        zoomLabel = document.createElement('span'); bar.appendChild(zoomLabel);
+        [['+', function () { zoomAt(innerWidth / 2, innerHeight / 2, 1.5); }],
+         ['\\u2212', function () { zoomAt(innerWidth / 2, innerHeight / 2, 1 / 1.5); }],
+         ['Fit', fitToScreen], ['100%', function () { zoomTo(innerWidth / 2, innerHeight / 2, 1); }],
+         ['\\u2715', close]].forEach(function (b) {
+          var btn = document.createElement('button'); btn.textContent = b[0]; btn.onclick = function (e) { e.stopPropagation(); b[1](); };
+          bar.appendChild(btn);
+        });
+        var hint = document.createElement('div'); hint.id = 'imgViewerHint';
+        hint.textContent = 'scroll to zoom \\u00b7 drag to move \\u00b7 double-click for 100% \\u00b7 Esc to close';
+        document.body.appendChild(box); document.body.appendChild(bar); document.body.appendChild(hint);
+        box._bar = bar; box._hint = hint;
+        box.addEventListener('wheel', function (e) { e.preventDefault(); zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * 0.0015)); }, { passive: false });
+        box.addEventListener('pointerdown', function (e) { drag = { px: e.clientX, py: e.clientY, x: x, y: y }; moved = 0; box.classList.add('dragging'); try { box.setPointerCapture(e.pointerId); } catch (err) {} });
+        box.addEventListener('pointermove', function (e) {
+          if (!drag) return;
+          moved = Math.max(moved, Math.abs(e.clientX - drag.px) + Math.abs(e.clientY - drag.py));
+          x = drag.x + e.clientX - drag.px; y = drag.y + e.clientY - drag.py; apply();
+        });
+        box.addEventListener('pointerup', function () { drag = null; box.classList.remove('dragging'); });
+        box.addEventListener('dblclick', function (e) { if (Math.abs(s - fit) < 0.001) zoomTo(e.clientX, e.clientY, 1); else fitToScreen(); });
+        box.addEventListener('click', function (e) {          /* a click on the dark area (not on the picture) closes */
+          var r = img.getBoundingClientRect();
+          var onPicture = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+          if (!onPicture && moved < 4) close();
+        });
+      }
+      function apply() {
+        img.style.transform = 'translate(' + x + 'px,' + y + 'px) scale(' + s + ')';
+        zoomLabel.textContent = Math.round(s * 100) + '%';
+      }
+      function fitToScreen() {
+        fit = Math.min(innerWidth / img.naturalWidth, innerHeight / img.naturalHeight);
+        s = fit; x = (innerWidth - img.naturalWidth * s) / 2; y = (innerHeight - img.naturalHeight * s) / 2; apply();
+      }
+      function zoomTo(cx, cy, target) {
+        target = Math.max(fit * 0.5, Math.min(MAX, target));
+        x = cx - (cx - x) * (target / s); y = cy - (cy - y) * (target / s); s = target; apply();
+      }
+      function zoomAt(cx, cy, factor) { zoomTo(cx, cy, s * factor); }
+      function open(src) {
+        if (!box) build();
+        document.body.style.overflow = 'hidden';
+        box.style.display = 'block'; box._bar.style.display = 'flex'; box._hint.style.display = 'block';
+        img.onload = fitToScreen;
+        if (img.src === src && img.complete) fitToScreen(); else img.src = src;
+      }
+      function close() {
+        if (!box) return;
+        box.style.display = 'none'; box._bar.style.display = 'none'; box._hint.style.display = 'none';
+        document.body.style.overflow = '';
+      }
+      document.addEventListener('click', function (e) {
+        if (e.target.classList && e.target.classList.contains('zoomable')) open(e.target.src);
+      });
+      document.addEventListener('keydown', function (e) {
+        if (!box || box.style.display === 'none') return;
+        if (e.key === 'Escape') close();
+        else if (e.key === '+' || e.key === '=') zoomAt(innerWidth / 2, innerHeight / 2, 1.5);
+        else if (e.key === '-') zoomAt(innerWidth / 2, innerHeight / 2, 1 / 1.5);
+        else if (e.key === '0') fitToScreen();
+      });
+      window.addEventListener('resize', function () { if (box && box.style.display !== 'none') fitToScreen(); });
+    })();
+  </script>
+"""
+
+
+_IMAGE_INDEX: dict[str, dict[str, str]] = {}
+
+
+def _image_index(folder):
+    """{lower-case file name: path} for every file under folder and its subfolders, built once per
+    folder. The audit finds images in subfolders, so the report has to as. A file nearer the top wins."""
+    if folder not in _IMAGE_INDEX:
+        index: dict[str, str] = {}
+        for root, _dirs, files in os.walk(folder):
+            for name in files:
+                index.setdefault(name.lower(), os.path.join(root, name))
+        _IMAGE_INDEX[folder] = index
+    return _IMAGE_INDEX[folder]
+
+
+def _find_local_image(folder, base_term):
+    """Path of <base_term> with a known image extension, in any letter case, anywhere under folder, or None."""
+    index = _image_index(folder)
+    for ext in _IMAGE_EXTS:
+        path = index.get(base_term.lower() + ext)
+        if path:
+            return path
+    return None
+
+
+def _image_data_uri(path):
+    """The image as a data URI the report can embed. JPEG and PNG go in as they are. Other formats
+    (TIFF above all, which browsers cannot show and which can be 100 MB) are converted to a resized JPEG."""
+    mime = _BROWSER_MIME.get(os.path.splitext(path)[1].lower())
+    if mime:
+        with open(path, "rb") as f:
+            return f"data:{mime};base64,{base64.b64encode(f.read()).decode()}"
+    import cv2
+    img = cv2.imread(path)
+    if img is None:
+        return ""
+    h, w = img.shape[:2]
+    if max(h, w) > _REPORT_IMAGE_MAX:
+        scale = _REPORT_IMAGE_MAX / max(h, w)
+        img = cv2.resize(img, (round(w * scale), round(h * scale)), interpolation=cv2.INTER_AREA)
+    ok, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 85])
+    return f"data:image/jpeg;base64,{base64.b64encode(buf.tobytes()).decode()}" if ok else ""
 
 
 def get_img(fn, gid, local_folder=None):
     """
     Try to return an image for the specimen.
-    1. Look for the file in local_folder (base64-encoded data URI).
+    1. Look for the file in local_folder (base64-encoded data URI; TIFF is converted to a small JPEG).
     2. Fall back to GBIF media API only when gid looks like a numeric GBIF ID.
     """
     if local_folder and os.path.isdir(local_folder):
@@ -30,11 +174,11 @@ def get_img(fn, gid, local_folder=None):
                                str(term), flags=re.IGNORECASE)
             # Strip path components so a crafted value (e.g. "../../etc/passwd") can't escape local_folder.
             base_term = os.path.basename(base_term)
-            for ext in (".jpg", ".jpeg", ".JPG", ".png", ".PNG", ".tif", ".tiff"):
-                path = os.path.join(local_folder, f"{base_term}{ext}")
-                if os.path.exists(path):
-                    with open(path, "rb") as f:
-                        return f"data:image/jpeg;base64,{base64.b64encode(f.read()).decode()}"
+            path = _find_local_image(local_folder, base_term)
+            if path:
+                uri = _image_data_uri(path)
+                if uri:
+                    return uri
 
     # Fall back to GBIF media API (only for numeric GBIF occurrence IDs)
     if gid and re.fullmatch(r"\d+", str(gid).strip()):
@@ -83,16 +227,16 @@ BADGE_COLORS = {
 
 BADGE_TOOLTIPS = {
     "Taxon-Match":   "Exact binomial match — genus + specific epithet identical after stripping authors",
-    "token-match":   "Collector token match — any shared surname or initial between AI and GBIF = 100%",
+    "token-match":   "Collector token match — any shared surname or initial between AI and the reference = 100%",
     "date-eval":     "Precision-aware date scoring — year match = 50%, year+month = 75-100%, full date = 100%",
     "cer":           "Character Error Rate — 1 - (Levenshtein distance / reference length). Score = similarity %",
     "coll-cer":      "Collector name CER — words paired by best match (tolerant of reordering, e.g. \"Smith, J.\" vs \"J. Smith\"), edits divided by the reference length; a matching initial is free",
-    "cer-manual-text": "GBIF/AI mismatch resolved against the actual label transcription (Label Studio) — exact whole-word match only, decide which side (or neither) the sheet backs, then CER against that reference",
+    "cer-manual-text": "Reference/AI mismatch resolved against the actual label transcription (Label Studio) — exact whole-word match only, decide which side (or neither) the sheet backs, then CER against that reference",
     "geo-hdx-match": "ISO country code match — standardised via HDX country database",
-    "geo-cer-bag":   "Location similarity — words paired by best match, tolerant of reordering; reference words with no match are not penalized (GBIF truth). Against a manual annotation, CER divided by the reference length",
+    "geo-cer-bag":   "Location similarity — words paired by best match, tolerant of reordering; reference words with no match are not penalized. Against a manual annotation, CER divided by the reference length",
     "coord-eval":    "Haversine distance — <1 km=100%, <10 km=90%, <50 km=30%, <100 km=10%, ≥100 km=0%",
-    "N/A":           "GBIF truth itself has no value for this field — not evaluable, excluded from the average",
-    "missing":       "GBIF truth is available but the AI did not extract this field — scored 0%, counted against the average",
+    "N/A":           "The reference itself has no value for this field — not evaluable, excluded from the average",
+    "missing":       "The reference has a value but the AI did not extract this field — scored 0%, counted against the average",
 }
 
 
@@ -112,15 +256,15 @@ SYN_SRC_COLORS = {
 # Human-readable display labels for synonym source badges
 # (key → (short_label, tooltip))
 SYN_SRC_DISPLAY = {
-    "WFO":       ("via WFO",         "AI used an old synonym; GBIF name is the current accepted name (World Flora Online)"),
-    "WFO-rev":   ("via WFO ↑",       "AI gave the current accepted name; GBIF name is outdated (World Flora Online)"),
+    "WFO":       ("via WFO",         "AI used an old synonym; the reference name is the current accepted name (World Flora Online)"),
+    "WFO-rev":   ("via WFO ↑",       "AI gave the current accepted name; the reference name is outdated (World Flora Online)"),
     "WFO-sib":   ("via WFO ≈",       "Both names are synonyms of the same accepted name (World Flora Online)"),
     "GBIF":      ("via GBIF",   "Verified in GBIF verbatim or interpreted record"),
-    "GBIFbb":     ("via GBIF backbone",   "AI used an old synonym; GBIF name is the current accepted name (GBIF's own backbone taxonomy)"),
-    "GBIFbb-rev": ("via GBIF backbone ↑", "AI gave the current accepted name; GBIF name is outdated (GBIF's own backbone taxonomy)"),
+    "GBIFbb":     ("via GBIF backbone",   "AI used an old synonym; the reference name is the current accepted name (GBIF's own backbone taxonomy)"),
+    "GBIFbb-rev": ("via GBIF backbone ↑", "AI gave the current accepted name; the reference name is outdated (GBIF's own backbone taxonomy)"),
     "GBIFbb-sib": ("via GBIF backbone ≈", "Both names are synonyms of the same accepted name (GBIF's own backbone taxonomy)"),
     "GBIFbb-eq":  ("via GBIF backbone =", "Both names resolve to the same accepted GBIF taxon — likely a spelling/orthographic variant of the same epithet"),
-    "NOREL":      ("no relationship", "AI's name is real and recognized by GBIF, but is not a synonym or match of the GBIF truth name — likely a different or superseded determination"),
+    "NOREL":      ("no relationship", "AI's name is real and recognized by GBIF, but is not a synonym or match of the reference name — likely a different or superseded determination"),
 }
 
 
@@ -182,14 +326,27 @@ COL_MAP = {
 
 
 def build_card(fname, gid, truth_row, ai_row, field_map, images_folder=None, manual_text=None,
-               strict_geo=False):
+               strict_geo=False, collector_flag=None, truth_source="gbif"):
     """Build an HTML audit card for one specimen.
     manual_text: sheet transcription, used only to resolve an eventDate
     mismatch that might be GBIF's fault (see get_accuracy).
     strict_geo: score geography as CER against the truth length (manual annotations).
+    truth_source: "gbif" (the truth is a GBIF record) or "annotation" (the truth comes from the
+    annotations file); only the wording and the GBIF link on the card depend on it.
     Returns (avg_score, html, has_image, field_results)."""
     gbif_url        = f"https://www.gbif.org/occurrence/{gid}"
     label           = display_name(fname, gid)
+    from_gbif       = truth_source == "gbif"
+    _rg             = "GBIF" if from_gbif else "reference"          # where the truth comes from, for the text on the card
+    _g              = "GBIF" if from_gbif else "the reference"
+    no_ref_text     = "no GBIF ref" if from_gbif else "no reference"
+    if from_gbif:
+        source_link = (f"<a href='{gbif_url}' target='_blank' style='font-size:0.7rem; color:#16a34a; "
+                       f"text-decoration:none; font-weight:600; margin-top:4px; display:inline-block;'>"
+                       f"↗ View on GBIF</a>")
+    else:
+        source_link = ("<span style='font-size:0.7rem; color:#6b7280; font-weight:600; margin-top:4px; "
+                       "display:inline-block;'>Reference: manual annotation · click the image to zoom</span>")
     rows_html       = ""
     card_scores     = []
     field_results   = []   # per-field records for the Excel export
@@ -442,8 +599,8 @@ def build_card(fname, gid, truth_row, ai_row, field_map, images_folder=None, man
               <td style='padding:8px; width:20%;'>
                 <span style='display:inline-block; padding:2px 8px; border-radius:99px;
                     font-size:0.6rem; font-weight:700; background:#e0f2fe; color:#0369a1;'
-                    title='Coordinates not extracted by AI — shown from GBIF for reference only'>
-                  inferred from GBIF
+                    title='Coordinates not extracted by AI — shown from {_g} for reference only'>
+                  inferred from {_rg}
                 </span>
               </td>
               <td style='padding:8px; width:16%; text-align:center;'>
@@ -499,8 +656,8 @@ def build_card(fname, gid, truth_row, ai_row, field_map, images_folder=None, man
                   <td style='padding:8px; width:20%;'>
                     <span style='display:inline-block; padding:2px 8px; border-radius:99px;
                         font-size:0.6rem; font-weight:700; background:#f5f5f4; color:#78716c;'
-                        title='GBIF has no coordinates. Geocoded from GBIF locality: {source_label}&#10;Via Nominatim / OpenStreetMap — approximate only, not scored against the AI'>
-                      geocoded (not GBIF truth)
+                        title='No coordinates in {_g}. Geocoded from the {_rg} locality: {source_label}&#10;Via Nominatim / OpenStreetMap — approximate only, not scored against the AI'>
+                      geocoded (not {_rg} truth)
                     </span>
                     <div style='font-size:0.6rem; color:#a8a29e; margin-top:3px; font-style:italic; line-height:1.4;'
                         title='{geo_display}'>{source_label}</div>
@@ -520,13 +677,13 @@ def build_card(fname, gid, truth_row, ai_row, field_map, images_folder=None, man
                 <tr style='border-bottom:1px solid #f9fafb; background:#fafaf9;'>
                   <td style='padding:8px; font-size:0.72rem; font-weight:600; color:#78716c; width:18%;'>coordinates</td>
                   <td style='padding:8px; font-size:0.7rem; color:#78716c; font-family:monospace; width:23%; font-style:italic;'
-                      title='Not real GBIF truth — geocoded from GBIF locality text'>{geo_coord_str} (geocoded)</td>
+                      title='Not real {_rg} truth — geocoded from the {_rg} locality text'>{geo_coord_str} (geocoded)</td>
                   <td style='padding:8px; font-size:0.7rem; color:#9ca3af; font-family:monospace; width:23%; font-style:italic;'>not extracted</td>
                   <td style='padding:8px; width:20%;'>
                     <span style='display:inline-block; padding:2px 8px; border-radius:99px;
                         font-size:0.6rem; font-weight:700; background:#f5f5f4; color:#78716c;'
-                        title='Geocoded from GBIF locality: {source_label}&#10;Via Nominatim / OpenStreetMap — approximate only, not authoritative GBIF coordinates'>
-                      geocoded (not GBIF truth)
+                        title='Geocoded from the {_rg} locality: {source_label}&#10;Via Nominatim / OpenStreetMap — approximate only, not authoritative {_rg} coordinates'>
+                      geocoded (not {_rg} truth)
                     </span>
                     <div style='font-size:0.6rem; color:#a8a29e; margin-top:3px; font-style:italic; line-height:1.4;'
                         title='{geo_display}'>{source_label}</div>
@@ -541,20 +698,20 @@ def build_card(fname, gid, truth_row, ai_row, field_map, images_folder=None, man
             # Geocoding failed too, but AI has coordinates — nothing to compare against
             ai_coord_str_nb = f"{float(ai_lat_nb):.5f}, {float(ai_lon_nb):.5f}"
             field_results.append({
-                "field": "coordinates", "truth": "no GBIF ref", "ai": ai_coord_str_nb,
+                "field": "coordinates", "truth": no_ref_text, "ai": ai_coord_str_nb,
                 "method": "ai-extracted-unref", "score": None, "note": "",
             })
             rows_html += f"""
             <tr style='border-bottom:1px solid #f9fafb; background:#f0fdf4;'>
               <td style='padding:8px; font-size:0.72rem; font-weight:600; color:#166534; width:18%;'>coordinates</td>
-              <td style='padding:8px; font-size:0.7rem; color:#9ca3af; font-family:monospace; width:23%; font-style:italic;'>no GBIF ref</td>
+              <td style='padding:8px; font-size:0.7rem; color:#9ca3af; font-family:monospace; width:23%; font-style:italic;'>{no_ref_text}</td>
               <td style='padding:8px; font-size:0.7rem; font-family:monospace; color:#1f2937; width:23%;'>{ai_coord_str_nb}</td>
               <td style='padding:8px; width:20%;'>
                 <span style='display:inline-block; padding:2px 8px; border-radius:99px;
                     font-size:0.6rem; font-weight:700; background:#dcfce7; color:#166534;'>
                   AI extracted
                 </span>
-                <div style='font-size:0.6rem; color:#86efac; margin-top:3px;'>no GBIF coords to compare</div>
+                <div style='font-size:0.6rem; color:#86efac; margin-top:3px;'>no {_rg} coords to compare</div>
               </td>
               <td style='padding:8px; width:16%; text-align:center;'>
                 <div style='font-size:0.75rem; font-weight:700; color:#a8a29e;'>—</div>
@@ -600,8 +757,8 @@ def build_card(fname, gid, truth_row, ai_row, field_map, images_folder=None, man
     img_b64   = get_img(fname, gid, local_folder=images_folder)
     has_image = bool(img_b64)
     img_html  = (
-        f"<img src='{img_b64}' style='max-height:440px; max-width:100%; "
-        f"object-fit:contain; border-radius:8px; display:block; margin:auto;'>"
+        f"<img class='zoomable' src='{img_b64}' style='max-height:440px; max-width:100%; "
+        f"object-fit:contain; border-radius:8px; display:block; margin:auto;' title='Click to enlarge'>"
         if img_b64 else
         "<div style='height:200px; display:flex; align-items:center; "
         "justify-content:center; color:#d1d5db; font-size:0.85rem;'>No image</div>"
@@ -623,11 +780,8 @@ def build_card(fname, gid, truth_row, ai_row, field_map, images_folder=None, man
           <div style='font-size:0.65rem; font-weight:700; letter-spacing:1.5px;
               color:#9ca3af; text-transform:uppercase; margin-bottom:2px;'>Specimen</div>
           <h3 style='margin:0; font-size:1rem; font-weight:700; color:#111827;
-              font-family:"IBM Plex Mono",monospace;'>{label} {excl_tag}</h3>
-          <a href='{gbif_url}' target='_blank' style='font-size:0.7rem; color:#16a34a;
-              text-decoration:none; font-weight:600; margin-top:4px; display:inline-block;'>
-            ↗ View on GBIF
-          </a>
+              font-family:"IBM Plex Mono",monospace;'>{label} {excl_tag}{flag_badge_html(collector_flag)}</h3>
+          {source_link}
         </div>
         <div style='text-align:center; min-width:90px;'>
           <svg width='72' height='72' viewBox='0 0 72 72'>
@@ -669,15 +823,43 @@ def build_card(fname, gid, truth_row, ai_row, field_map, images_folder=None, man
     return avg, card, has_image, field_results
 
 
-def _make_unmatched_card(fname, gid):
-    """Build a placeholder card for specimens with no truth data found."""
+def _make_unmatched_card(fname, gid, ai_row=None, images_folder=None):
+    """Build a card for specimens with no truth data found: not scored, but it still shows
+    the AI's transcription and the specimen image (when ai_row / images_folder are given)."""
+    import html as _html
     label    = display_name(fname, gid)
-    gbif_url = f"https://www.gbif.org/occurrence/{gid}"
+    body = ""
+    if ai_row is not None:
+        cell = "padding:6px 8px; font-size:0.72rem; border-bottom:1px solid #f3f4f6;"
+        rows = []
+        for col, text, _section in _NOREF_FIELDS:
+            value = ai_row.get(col, "")
+            value = "" if value is None else str(value).strip()
+            if value and value.lower() not in ("nan", "none"):
+                rows.append(
+                    f"<tr><td style='{cell} font-weight:600; color:#374151; width:34%;'>{_html.escape(text)}</td>"
+                    f"<td style='{cell} font-family:monospace; color:#1f2937;'>{_html.escape(value)}</td></tr>")
+        # No GBIF lookup here (gid=None): there is no record, only a local file can be shown.
+        img_src = get_img(fname, None, local_folder=images_folder)
+        img_html = (
+            f"<img class='zoomable' src='{img_src}' style='max-height:440px; max-width:100%; "
+            f"object-fit:contain; border-radius:8px; display:block; margin:auto;' title='Click to enlarge'>"
+            if img_src else
+            "<div style='height:120px; display:flex; align-items:center; justify-content:center; "
+            "color:#d1d5db; font-size:0.85rem;'>No image</div>"
+        )
+        table = (f"<table style='width:100%; border-collapse:collapse;'>{''.join(rows)}</table>"
+                 if rows else "<div style='color:#9ca3af; font-size:0.8rem; padding:12px 8px;'>Nothing was extracted.</div>")
+        body = (f"<div style='display:grid; grid-template-columns:1fr 280px;'>"
+                f"<div style='padding:8px;'>{table}</div>"
+                f"<div style='background:#fafafa; display:flex; align-items:center; padding:12px;'>{img_html}</div>"
+                f"</div>")
+
     return f"""
     <div class='audit-card unmatched-card' data-score='-1' style='
         background:#fff; border-radius:16px; margin-bottom:32px;
         box-shadow:0 1px 3px rgba(0,0,0,.07), 0 4px 12px rgba(0,0,0,.04);
-        overflow:hidden; border:1.5px dashed #e5e7eb; opacity:0.75;'>
+        overflow:hidden; border:1.5px dashed #e5e7eb;'>
       <div style='display:flex; align-items:center; gap:14px; padding:18px 24px;
           background:repeating-linear-gradient(45deg,#fafafa,#fafafa 8px,#f3f4f6 8px,#f3f4f6 16px);'>
         <div style='width:42px; height:42px; border-radius:50%; background:#f3f4f6;
@@ -688,32 +870,12 @@ def _make_unmatched_card(fname, gid):
               color:#9ca3af; text-transform:uppercase; margin-bottom:2px;'>No truth data found</div>
           <h3 style='margin:0; font-size:1rem; font-weight:700; color:#6b7280;
               font-family:"IBM Plex Mono",monospace;'>{label}</h3>
-          <a href='{gbif_url}' target='_blank' style='font-size:0.7rem; color:#9ca3af;
-              text-decoration:none; font-weight:600; margin-top:4px; display:inline-block;'>
-            ↗ View on GBIF
-          </a>
         </div>
         <div style='margin-left:auto; font-size:0.75rem; font-weight:700;
             color:#9ca3af; font-family:"IBM Plex Mono",monospace;'>not evaluated</div>
       </div>
+      {body}
     </div>"""
-
-
-def _gemini_image_tokens(width: int, height: int, max_dim: int | None = None) -> int:
-    """
-    Estimate Gemini vision token count for an image.
-    Images are tiled at 768×768 px; each tile = 258 tokens.
-    Gemini hard-caps the long side at 3072 px before tiling.
-    Pass max_dim to simulate a lower resolution.
-    """
-    w, h = max(int(width), 1), max(int(height), 1)
-    if max_dim:
-        scale = min(max_dim / max(w, h), 1.0)
-        w, h  = max(1, int(w * scale)), max(1, int(h * scale))
-    if max(w, h) > 3072:
-        scale = 3072 / max(w, h)
-        w, h  = max(1, int(w * scale)), max(1, int(h * scale))
-    return max(math.ceil(w / 768) * math.ceil(h / 768), 1) * 258
 
 
 # (input_rate, output_rate) in USD per single token
@@ -758,7 +920,7 @@ _NOREF_FIELDS = [
 _SECTION_ICON = {"Taxonomy": "", "Collector": "", "Geography": ""}
 
 
-def build_no_reference_card(fname, ai_row, tax_info, img_meta, images_folder=None):
+def build_no_reference_card(fname, ai_row, tax_info, img_meta, images_folder=None, collector_flag=None):
     """
     Build an HTML card for --no_reference mode.
     Shows all extracted fields, WFO/GBIF taxonomy status, cost and resolution info.
@@ -768,8 +930,8 @@ def build_no_reference_card(fname, ai_row, tax_info, img_meta, images_folder=Non
 
     img_src  = get_img(fname, fname, local_folder=images_folder)
     img_html = (
-        f"<img src='{img_src}' style='max-height:360px; max-width:100%; "
-        f"object-fit:contain; border-radius:8px; display:block; margin:auto;'>"
+        f"<img class='zoomable' src='{img_src}' style='max-height:360px; max-width:100%; "
+        f"object-fit:contain; border-radius:8px; display:block; margin:auto;' title='Click to enlarge'>"
         if img_src else
         "<div style='height:120px; display:flex; align-items:center; "
         "justify-content:center; color:#d1d5db; font-size:0.8rem;'>No image</div>"
@@ -1015,7 +1177,7 @@ def build_no_reference_card(fname, ai_row, tax_info, img_meta, images_folder=Non
           <div style='font-size:0.65rem; font-weight:700; letter-spacing:1.5px;
               color:#9ca3af; text-transform:uppercase; margin-bottom:2px;'>Specimen</div>
           <h3 style='margin:0; font-size:1rem; font-weight:700; color:#111827;
-              font-family:"IBM Plex Mono",monospace;'>{label}{cost_badge}</h3>
+              font-family:"IBM Plex Mono",monospace;'>{label}{cost_badge}{flag_badge_html(collector_flag)}</h3>
         </div>
         <div style='font-size:0.65rem; color:#9ca3af; text-align:right; font-family:monospace;'>
           {res_str}<br><span style='font-size:0.6rem; color:#d1d5db;'>{model_name}</span>

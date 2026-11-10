@@ -12,9 +12,16 @@ from pathlib import Path
 from .text import strip_authors
 from .gbif import fetch_gbif_data, smart_get, _gbif_fuzzy_resolve
 from .wfo import _load_wfo_cache, _save_wfo_cache, _wfo_lookup, _wfo_checklistbank_match
-from .report import build_card, _make_unmatched_card, build_no_reference_card, _NOREF_FIELDS, fmt_pct
+from .report import build_card, _make_unmatched_card, build_no_reference_card, fmt_pct
 from .manual_ground_truth import load_manual_annotations, _truth_row_from_annotation
 from .bdq import bdq_rows, write_bdq_html, write_bdq_sheets
+from .collectors import collector_flag
+from .report import IMAGE_VIEWER_HEAD
+
+# The specimen id is the file name without its image extension. TIFF has to be in this list too, or a
+# TIFF keeps ".tiff" in its id and then matches neither a GBIF record nor an entry in annotations.json.
+_IMAGE_EXT_RE = re.compile(r"\.(jpe?g|png|tiff?|bmp|webp)$", re.IGNORECASE)
+
 
 def _lazy_imports():
     """Import slow packages on first use, not at CLI startup."""
@@ -128,7 +135,7 @@ def _run_no_reference(vv_df: "pd.DataFrame", gemini_model: str, images_folder=No
 
     for _, ai_row in vv_df.iterrows():
         fname   = str(ai_row.get("filename", "")).strip()
-        pure_id = re.sub(r"\.(jpg|jpeg|png|JPG|PNG)$", "", fname, flags=re.IGNORECASE).strip()
+        pure_id = _IMAGE_EXT_RE.sub("", fname).strip()
 
         # WFO accepted/synonym status via GBIF Checklistbank (has a real
         # taxonomicStatus field, unlike matching_rest.php).
@@ -198,7 +205,8 @@ def _run_no_reference(vv_df: "pd.DataFrame", gemini_model: str, images_folder=No
             "model":        ai_row.get("_model", gemini_model),
         }
         cost, card_html = build_no_reference_card(
-            pure_id, ai_row, tax_info, img_meta, images_folder
+            pure_id, ai_row, tax_info, img_meta, images_folder,
+            collector_flag=collector_flag(ai_row)
         )
         total_cost  += cost
         cards_html  += card_html
@@ -286,6 +294,7 @@ def _run_no_reference(vv_df: "pd.DataFrame", gemini_model: str, images_folder=No
     #cardContainer {{ max-width: 1180px; margin: 32px auto; padding: 0 32px 64px; }}
     .audit-card:hover {{ box-shadow: 0 4px 12px rgba(0,0,0,.10), 0 16px 40px rgba(0,0,0,.09) !important; }}
   </style>
+  {IMAGE_VIEWER_HEAD}
 </head>
 <body>
 
@@ -555,7 +564,7 @@ def run_audit(input_path=None, images_folder=None, truth_path=None,
 
     def _process_one(ai_row):
         fname   = str(ai_row.get("filename", ""))
-        pure_id = re.sub(r"\.(jpg|jpeg|png|JPG|PNG)$", "", fname, flags=re.IGNORECASE).strip()
+        pure_id = _IMAGE_EXT_RE.sub("", fname).strip()
         gid     = pure_id
         manual_text = manual_transcriptions.get(pure_id)
 
@@ -566,20 +575,21 @@ def run_audit(input_path=None, images_folder=None, truth_path=None,
             if annotation is None:
                 print(f"  {pure_id}: no GBIF data found")
                 _persist_gbif_accuracy(pure_id, None)
-                return "unmatched", (-1.0, _make_unmatched_card(pure_id, gid), False, [], pure_id, gid)
+                return "unmatched", (-1.0, _make_unmatched_card(pure_id, gid, ai_row, images_folder), False, [], pure_id, gid)
 
             verified_str = "verified" if annotation.get("verified") else "UNVERIFIED draft"
             print(f"  {pure_id}: no GBIF data — scoring against manual annotation ({verified_str})")
             truth_row = _truth_row_from_annotation(annotation)
             avg, card_html, has_image, field_results = build_card(
                 pure_id, gid, truth_row, ai_row, field_map, images_folder=images_folder,
-                manual_text=manual_text, strict_geo=True
+                manual_text=manual_text, strict_geo=True, collector_flag=collector_flag(ai_row),
+                truth_source="annotation"
             )
             print(f"  MATCHED {pure_id}  ({fmt_pct(avg)}, vs. manual annotation)")
             _persist_gbif_accuracy(pure_id, avg)
             return "matched", (avg, card_html, has_image, field_results, pure_id, gid)
 
-        gid = str(occ.get("gbifId", pure_id))
+        gid = str(occ.get("gbifID") or occ.get("key") or pure_id)       # the record's own GBIF number, for the link
         event_date = (
             occ.get("eventDate")
             or occ.get("verbatimEventDate")
@@ -608,7 +618,7 @@ def run_audit(input_path=None, images_folder=None, truth_path=None,
         }
         avg, card_html, has_image, field_results = build_card(
             pure_id, gid, truth_row, ai_row, field_map, images_folder=images_folder,
-            manual_text=manual_text
+            manual_text=manual_text, collector_flag=collector_flag(ai_row, own=occ)
         )
         print(f"  MATCHED {pure_id}  ({fmt_pct(avg)})")
         _persist_gbif_accuracy(pure_id, avg)
@@ -628,10 +638,10 @@ def run_audit(input_path=None, images_folder=None, truth_path=None,
                 kind, result = fut.result()
             except Exception as exc:
                 fname = str(futures[fut].get("filename", "?"))
-                pure_id = re.sub(r"\.(jpg|jpeg|png|JPG|PNG)$", "", fname, flags=re.IGNORECASE).strip()
+                pure_id = _IMAGE_EXT_RE.sub("", fname).strip()
                 print(f"  {pure_id}: worker crashed ({exc}) — treating as unmatched")
                 unmatched_cards.append(
-                    (-1.0, _make_unmatched_card(pure_id, pure_id), False, [], pure_id, pure_id)
+                    (-1.0, _make_unmatched_card(pure_id, pure_id, futures[fut], images_folder), False, [], pure_id, pure_id)
                 )
                 continue
             if kind == "matched":
@@ -796,6 +806,7 @@ def run_audit(input_path=None, images_folder=None, truth_path=None,
     .unmatched-divider::before, .unmatched-divider::after {{ content: ''; flex: 1; height: 1px; background: #e5e7eb; }}
     .audit-card:hover {{ box-shadow: 0 4px 12px rgba(0,0,0,.10), 0 16px 40px rgba(0,0,0,.09) !important; }}
   </style>
+  {IMAGE_VIEWER_HEAD}
 </head>
 <body>
 
@@ -834,7 +845,7 @@ def run_audit(input_path=None, images_folder=None, truth_path=None,
     <span class='legend-item'>Synonym via:</span>
     <span class='tip-wrap'>
       <span class='legend-badge' style='background:#dcfce7; color:#15803d;'>WFO</span>
-      <span class='tip'>AI used an old synonym — GBIF name is current accepted (World Flora Online)</span>
+      <span class='tip'>AI used an old synonym — the reference name is current accepted (World Flora Online)</span>
     </span>
     <span class='tip-wrap'>
       <span class='legend-badge' style='background:#dbeafe; color:#1e40af;'>GBIF</span>
@@ -842,7 +853,7 @@ def run_audit(input_path=None, images_folder=None, truth_path=None,
     </span>
     <span class='tip-wrap'>
       <span class='legend-badge' style='background:#fef3c7; color:#a16207;'>WFO ↑</span>
-      <span class='tip'>AI gave current accepted name — GBIF name is outdated (World Flora Online)</span>
+      <span class='tip'>AI gave current accepted name — the reference name is outdated (World Flora Online)</span>
     </span>
     <span class='tip-wrap'>
       <span class='legend-badge' style='background:#e0f2fe; color:#0369a1;'>WFO ≈</span>
@@ -900,11 +911,11 @@ def run_audit(input_path=None, images_folder=None, truth_path=None,
       </div>
       <div style='display:flex; gap:8px; align-items:flex-start;'>
         <span style='display:inline-block;padding:2px 8px;border-radius:99px;font-size:0.6rem;font-weight:700;background:#f9fafb;color:#9ca3af;white-space:nowrap;flex-shrink:0;'>N/A</span>
-        <span style='font-size:0.7rem;color:#6b7280;line-height:1.4;'>GBIF truth itself has no value for this field — not evaluable, excluded from the average</span>
+        <span style='font-size:0.7rem;color:#6b7280;line-height:1.4;'>The reference itself has no value for this field — not evaluable, excluded from the average</span>
       </div>
       <div style='display:flex; gap:8px; align-items:flex-start;'>
         <span style='display:inline-block;padding:2px 8px;border-radius:99px;font-size:0.6rem;font-weight:700;background:#fee2e2;color:#b91c1c;white-space:nowrap;flex-shrink:0;'>missing</span>
-        <span style='font-size:0.7rem;color:#6b7280;line-height:1.4;'>GBIF truth is available but the AI did not extract this field — scored 0%, counted against the average</span>
+        <span style='font-size:0.7rem;color:#6b7280;line-height:1.4;'>The reference has a value but the AI did not extract this field — scored 0%, counted against the average</span>
       </div>
     </div>
   </div>
@@ -964,7 +975,7 @@ sortCards(false);
     #   "Field Summary" mean accuracy per field.
     #   "BDQ"           with --bdq_test: one row per specimen and TDWG BDQ test, run on the AI transcription.
     def _pid(fname):
-        return re.sub(r"\.(jpg|jpeg|png|JPG|PNG)$", "", str(fname), flags=re.IGNORECASE).strip()
+        return _IMAGE_EXT_RE.sub("", str(fname)).strip()
 
     ai_by_id = {_pid(r.get("filename", "")): r for _, r in vv_df.iterrows()}
     all_ids  = [c[4] for c in matched_cards] + [c[4] for c in unmatched_cards]

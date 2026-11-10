@@ -95,9 +95,21 @@ def token_pair_cer(tru_tokens: list[str], ext_tokens: list[str],
     return total_matched / total_len if total_len else 0.0
 
 
+_SPECIES_PLACEHOLDER = re.compile(r"(?:\s+(?:species|spec|spp|sp)\b\.?)+\s*$", re.IGNORECASE)
+
+
+def _drop_species_placeholder(name):
+    """'Asplenium species', 'Asplenium sp.' and 'Asplenium spp.' answer with the genus only: the last word is a
+    placeholder for 'a species I could not name', not part of a name, so it is not compared."""
+    text = str(name).strip()
+    return _SPECIES_PLACEHOLDER.sub("", text) or text
+
+
 def get_accuracy(target, extraction, is_tax=False, is_coll=False,
                  is_date=False, is_geo=False, gbif_meta=None, manual_text=None,
                  is_epithet=False, strict_geo=False):
+    if is_tax:
+        target, extraction = _drop_species_placeholder(target), _drop_species_placeholder(extraction)
     e_raw = clean_text(extraction)
     t_raw = clean_text(target)
 
@@ -225,7 +237,7 @@ def _baseline_accuracy(t_raw, e_raw, target, extraction, is_tax, is_coll, is_dat
                     article = "an" if status[:1] in "aeiou" else "a"
                     return None, EXCLUDED_SENTINEL, "#fff8e1", (
                         f"NOREL||'{clean_extr}' is {article} {status} name in GBIF's backbone taxonomy, "
-                        f"but has no relationship to GBIF truth name '{clean_target}'"
+                        f"but has no relationship to the reference name '{clean_target}'"
                     )
 
     if is_date:
@@ -298,7 +310,7 @@ def _baseline_accuracy(t_raw, e_raw, target, extraction, is_tax, is_coll, is_dat
         if nearest is None:
             note = "Not found in WFO — possible extraction error"
         elif sim >= 0.98:
-            note = f"Closest {src} match: <i>{nearest}</i> ({int(sim * 100)}% similar) — relationship to GBIF truth not verified"
+            note = f"Closest {src} match: <i>{nearest}</i> ({int(sim * 100)}% similar) — relationship to the reference not verified"
         elif sim >= 0.60:
             note = f"Closest {src} match: <i>{nearest}</i> ({int(sim * 100)}% similar)"
         else:

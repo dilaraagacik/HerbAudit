@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import Any
 
 from google import genai
-from google.genai import types
 
 from .schema import HERBARIUM_SCHEMA, _normalize_record, _split_record, SINGLE_PASS_PROMPT
 from .cost import (

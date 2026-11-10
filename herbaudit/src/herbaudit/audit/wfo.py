@@ -425,7 +425,7 @@ def wfo_status_badge_html(name: str) -> str:
         fg, bg, label = "#a16207", "#fef3c7", f"WFO: synonym of <i>{acc}</i>"
     else:
         fg, bg, label = "#6b7280", "#f3f4f6", f"WFO: {status or 'unrecognized'}"
-    tooltip = "Independent status from World Flora Online for the AI-extracted name, regardless of relationship to the GBIF truth name"
+    tooltip = "Independent status from World Flora Online for the AI-extracted name, regardless of relationship to the reference name"
     return (
         f"<span style='display:inline-block; padding:2px 8px; border-radius:99px; "
         f"font-size:0.6rem; font-weight:700; background:{bg}; color:{fg};' "
