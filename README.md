@@ -100,6 +100,7 @@ Common flags:
 herbaudit ./scans --model qwen2.5vl:7b --ollama-host http://localhost:11434
 herbaudit ./scans --model gemini-2.5-flash --no-reference   # skip evaluation get transcription results only
 herbaudit ./scans --model gemini-2.5-flash --detector opencv   # skip the YOLO detector
+herbaudit paths.txt --model gemini-3.5-flash-lite              # audit only the images listed in paths.txt
 ```
 
 Run `herbaudit --help` for the full flag reference.

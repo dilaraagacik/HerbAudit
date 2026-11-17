@@ -399,19 +399,20 @@ def run_audit(input_path=None, images_folder=None, truth_path=None,
 
     # A single image file should also be treated as image mode, or it falls
     # through to the CSV/Excel branch and pd.read_csv() chokes on the bytes.
-    from herbaudit.pipeline.images import IMAGE_EXTENSIONS
+    from herbaudit.pipeline.images import IMAGE_EXTENSIONS, is_image_list
     _is_single_image = inp.is_file() and inp.suffix.lower() in IMAGE_EXTENSIONS
+    _is_image_list = is_image_list(inp)          # a .txt with one image path per line
 
     # Default for CSV/Excel mode; image mode below overrides with a model-specific name.
     output_dir = "./herbaudit_output"
 
-    if inp.is_dir() or _is_single_image:
+    if inp.is_dir() or _is_single_image or _is_image_list:
         if not gemini_api_key and not openai_api_key and not ollama_model:
             raise ValueError(
                 "input_path is an image file or folder — provide --gemini-key, --openai-key, or --ollama-model."
             )
         provider = "Gemini" if gemini_api_key else "OpenAI" if openai_api_key else "Ollama"
-        what = "image folder" if inp.is_dir() else "image file"
+        what = "image folder" if inp.is_dir() else "image list" if _is_image_list else "image file"
         print(f"{what.capitalize()} detected — running {provider} extraction via HerbAudit...")
 
         ha = HerbAudit(
@@ -505,9 +506,18 @@ def run_audit(input_path=None, images_folder=None, truth_path=None,
 
     # Fall back to the input's own folder so card thumbnails can be found
     # locally (a single file's parent, since get_img() needs a directory).
+    # For a .txt image list the photos are wherever the list points, not next to the list.
+    if _is_image_list and not images_folder:
+        from herbaudit.pipeline.images import image_list_folder
+        images_folder = image_list_folder(inp)
     images_folder = images_folder or (
         str(inp) if inp.is_dir() else str(inp.parent) if inp.is_file() else None
     )
+    if no_html:
+        # The photos are only embedded in the HTML cards. Building those cards still
+        # happens without an HTML file, so without this every full-size photo would be
+        # read and base64-encoded in memory for nothing (GBs for a large run).
+        images_folder = None
 
     if noreference:
         _run_no_reference(vv_df, gemini_model, images_folder, output_tag=output_tag, bdq_test=bdq_test, no_html=no_html)

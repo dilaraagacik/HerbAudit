@@ -12,7 +12,7 @@ from pathlib import Path
 
 import requests
 
-from .images import IMAGE_EXTENSIONS
+from .images import IMAGE_EXTENSIONS, is_image_list
 
 _API_URL = "https://api.gbif.org/v1/occurrence/"
 _HEADERS = {"User-Agent": "HerbAudit (+https://github.com/dilaraagacik/HerbAudit)"}
@@ -25,11 +25,12 @@ _CONTENT_TYPE_EXT = {
 
 def is_gbif_links(input_path: str) -> bool:
     """True if the input is a single GBIF occurrence link or a .txt list of links
-    or ids. CSV/Excel files are always extraction results, never link lists."""
+    or ids. CSV/Excel files are always extraction results, never link lists, and a
+    .txt of image file paths is an image list, not GBIF ids."""
     if _LINK_RE.search(input_path):
         return True
     path = Path(input_path)
-    return path.is_file() and path.suffix.lower() == ".txt"
+    return path.is_file() and path.suffix.lower() == ".txt" and not is_image_list(path)
 
 
 def parse_gbif_ids(source: str) -> list[str]:

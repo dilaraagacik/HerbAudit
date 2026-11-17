@@ -44,3 +44,5 @@ output_voucher_vision/
 VV.ipynb
 model_comparison_*.png
 images_from_paris/
+upload_1000.py
+download_1000.py

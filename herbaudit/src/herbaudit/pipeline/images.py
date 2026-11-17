@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -78,9 +79,75 @@ def _full_image_fallback(raw, src_w: int, src_h: int, image_path: Path,
     return image_bytes, mime_type, src_w, src_h
 
 
+def is_image_list(input_path) -> bool:
+    """True for a .txt file that lists image files, one path per line.
+
+    Decided by the first non-blank line having an image extension, so a .txt of
+    GBIF occurrence links or ids (--> gbif_links.py) is never mistaken for it."""
+    path = Path(input_path)
+    if not (path.is_file() and path.suffix.lower() == ".txt"):
+        return False
+    for line in path.read_text(encoding="utf-8-sig").splitlines():
+        line = line.strip().strip('"')
+        if line and not line.startswith("#"):
+            return Path(line.replace("\\", "/")).suffix.lower() in IMAGE_EXTENSIONS
+    return False
+
+
+def _listed_path(line: str, base: Path) -> Path:
+    """One line of an image list as a Path. A Windows drive path (Z:\\dir\\a.jpg) is
+    mapped to /mnt/z/dir/a.jpg when running on Linux/WSL; a relative path is taken
+    relative to the folder holding the list."""
+    m = re.match(r"^([A-Za-z]):[\\/](.*)$", line)
+    if m and os.name != "nt":
+        return Path("/mnt") / m.group(1).lower() / m.group(2).replace("\\", "/")
+    p = Path(line)
+    return p if p.is_absolute() or (m and os.name == "nt") else base / p
+
+
+def image_list_folder(list_path) -> str | None:
+    """Closest folder holding every image named in a .txt list (the folder itself
+    when they all sit in one), or None if there is none. The report searches this
+    folder for each sheet's photo, so for a list it must be the images' folder, not
+    the folder of the list file."""
+    try:
+        files = _read_image_list(Path(list_path), quiet=True)
+        return os.path.commonpath([str(p.parent) for p in files])
+    except ValueError:                     # no existing images, or paths on different drives
+        return None
+
+
+def _read_image_list(list_path: Path, quiet: bool = False) -> list[Path]:
+    """Image files named in a .txt list, in file order, without duplicates.
+    Blank lines and lines starting with # are ignored; files that do not exist
+    are reported (unless quiet) and skipped."""
+    found: dict[Path, None] = {}
+    missing: list[str] = []
+    for raw in list_path.read_text(encoding="utf-8-sig").splitlines():
+        line = raw.strip().strip('"')
+        if not line or line.startswith("#"):
+            continue
+        p = _listed_path(line, list_path.parent)
+        if p.suffix.lower() not in IMAGE_EXTENSIONS:
+            missing.append(line)
+        elif p.is_file():
+            found[p] = None
+        else:
+            missing.append(line)
+    if missing and not quiet:
+        shown = ", ".join(missing[:5]) + (" ..." if len(missing) > 5 else "")
+        print(f"  {len(missing)} line(s) in {list_path.name} are not image files that exist and were skipped: {shown}")
+    if not found:
+        raise ValueError(f"No existing image files found in the list {list_path}")
+    return list(found)
+
+
 def _gather_images(input_path: str) -> list[Path]:
-    """Sorted image files under input_path — every file in it if it's a
-    directory, or just itself if it's a single image file."""
+    """Image files for input_path: those listed in it if it's a .txt image list,
+    otherwise every image under it if it's a directory, or just itself if it's a
+    single image file (sorted)."""
+    if is_image_list(input_path):
+        return _read_image_list(Path(input_path))
     inp = Path(input_path)
     return sorted(
         p for p in (inp.rglob("*") if inp.is_dir() else [inp])

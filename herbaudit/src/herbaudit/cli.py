@@ -120,7 +120,8 @@ def _print_help():
           f"(--config / HERBAUDIT_CONFIG to override) — CLI flags always win.{_X}")
 
     section("Required")
-    row("<path>", "", "Folder of images, a CSV / Excel extraction file, or a .txt of "
+    row("<path>", "", "Folder of images, a .txt listing image files (one path per line), "
+        "a CSV / Excel extraction file, or a .txt of "
         "gbif.org/occurrence links or ids (images are downloaded to ./<name>_images first). "
         "Also accepted as --input PATH",
         required=True)

@@ -561,11 +561,39 @@ class HerbAudit:
             ))
         payload_by_path = {p: pl for p, pl in built}
 
+        # Batch jobs already submitted by an earlier run that was interrupted are
+        # picked up again (their job names were saved) instead of being resubmitted
+        # and paid for twice. Only images that still need a result are kept.
+        jobs_file = out / "_batch_jobs.json"
+        by_stem = {p.stem: p for p in to_process}
+        resumed: list[dict] = []
+        others: list[dict] = []      # saved jobs for other images/models: kept in the file untouched
+        saved_jobs: list[dict] = []
+        if jobs_file.exists():
+            try:
+                saved_jobs = json.loads(jobs_file.read_text(encoding="utf-8")).get("jobs", [])
+            except (OSError, ValueError, AttributeError):
+                saved_jobs = []
+        for job in saved_jobs:
+            if not job.get("job_name"):
+                continue
+            keys = {s: by_stem[s] for s in job.get("keys", {}) if s in by_stem}
+            if skip_existing and keys and job.get("model") == self.model:   # --force means start fresh
+                resumed.append({"job_name": job["job_name"], "chunk_idx": len(resumed),
+                                "keys": keys, "submit_error": None})
+            else:
+                others.append(job)
+        covered = {s for info in resumed for s in info["keys"]}
+        if resumed:
+            print(f"  Resuming {len(resumed)} batch job(s) from an earlier run "
+                  f"({len(covered)} image(s)) — not submitting those again")
+        to_submit = [p for p in to_process if p.stem not in covered]
+
         chunk_budget = batch_chunk_mb * 1024 * 1024
         chunks: list[list[Path]] = []
         current: list[Path] = []
         current_bytes = 0
-        for img_path in to_process:
+        for img_path in to_submit:
             # base64 inflates raw bytes ~4/3; + a small constant for the
             # surrounding JSON/prompt text so the estimate errs conservative.
             encoded_size = int(len(payload_by_path[img_path]["image_bytes"]) * 4 / 3) + 4096
@@ -577,8 +605,10 @@ class HerbAudit:
         if current:
             chunks.append(current)
 
-        print(f" {len(chunks)} batch chunk(s) for {len(to_process)} image(s) "
-              f"(~{batch_chunk_mb} MB budget each)")
+        total_chunks = len(resumed) + len(chunks)
+        if chunks:
+            print(f" {len(chunks)} new batch chunk(s) for {len(to_submit)} image(s) "
+                  f"(~{batch_chunk_mb} MB budget each)")
 
         def _submit_chunk(idx: int, chunk: list[Path]) -> dict:
             # Failures here are caught and reported as a failed chunk rather
@@ -606,25 +636,40 @@ class HerbAudit:
                     src=uploaded.name,
                     config={"display_name": f"herbaudit-batch-{idx}"},
                 )
-                print(f"Chunk {idx + 1}/{len(chunks)} submitted — "
+                print(f"Chunk {idx + 1}/{total_chunks} submitted — "
                       f"{len(chunk)} image(s) — job {job.name}")
                 return {"job_name": job.name, "chunk_idx": idx, "keys": keys, "submit_error": None}
             except Exception as exc:
-                print(f"Chunk {idx + 1}/{len(chunks)} failed to submit — {exc}")
+                print(f"Chunk {idx + 1}/{total_chunks} failed to submit — {exc}")
                 return {"job_name": None, "chunk_idx": idx, "keys": keys, "submit_error": str(exc)}
             finally:
                 jsonl_path.unlink(missing_ok=True)
 
-        with ThreadPoolExecutor(max_workers=min(batch_submit_workers, len(chunks))) as pool:
-            job_infos = list(pool.map(lambda item: _submit_chunk(*item), enumerate(chunks)))
+        with ThreadPoolExecutor(max_workers=max(1, min(batch_submit_workers, len(chunks)))) as pool:
+            new_infos = list(pool.map(lambda item: _submit_chunk(*item),
+                                      enumerate(chunks, start=len(resumed))))
+        job_infos = resumed + new_infos
+
+        # Save the job names the moment they exist, so Ctrl-C / a closed terminal /
+        # a lost connection after this point loses nothing: run the same command
+        # again to collect the results. Removed once the results are saved.
+        try:
+            jobs_file.write_text(json.dumps({
+                "jobs": others + [{"job_name": i["job_name"], "model": self.model, "chunk_idx": i["chunk_idx"],
+                                   "keys": {s: str(p) for s, p in i["keys"].items()}}
+                                  for i in job_infos if i["job_name"]],
+            }, indent=2), encoding="utf-8")
+        except OSError as exc:
+            print(f"  Warning: could not save the batch job names ({exc}); "
+                  f"an interrupted run could not be resumed")
 
         _ENDED_STATES = {
             "JOB_STATE_SUCCEEDED", "JOB_STATE_FAILED",
             "JOB_STATE_CANCELLED", "JOB_STATE_EXPIRED",
         }
-        print(f" {len(chunks)} chunk(s) submitted — "
+        print(f" {total_chunks} chunk(s) running — "
               f"polling every {batch_poll_interval:.0f}s until done "
-              f"(target turnaround is minutes-to-24h)...")
+              f"(target turnaround is minutes-to-24h; Ctrl-C is safe — run the same command later to collect)...")
 
         chunk_outcomes: dict[str, tuple] = {}   # image stem -> ("ok", record, in_tok, out_tok) | ("error", msg)
         n_done_chunks  = 0
@@ -699,8 +744,8 @@ class HerbAudit:
                             chunk_outcomes[key] = ("error", "no result returned for this key")
 
                 n_done_chunks += 1
-                print(f" Chunk {idx + 1}/{len(chunks)} finished ({state}) — "
-                      f"{n_done_chunks}/{len(chunks)} total")
+                print(f" Chunk {idx + 1}/{total_chunks} finished ({state}) — "
+                      f"{n_done_chunks}/{total_chunks} total")
                 del remaining[idx]
             if remaining:
                 time.sleep(batch_poll_interval)
@@ -760,6 +805,14 @@ class HerbAudit:
                     json.dump(record, f, ensure_ascii=False, indent=2)
                 self.results.append(record)
                 n_ok += 1
+
+        # Results are now in the *_audit.json cache; the saved job names are no
+        # longer needed (and a failed/expired job must not be picked up again).
+        # Jobs of other lists/models that are still pending stay in the file.
+        if others:
+            jobs_file.write_text(json.dumps({"jobs": others}, indent=2), encoding="utf-8")
+        else:
+            jobs_file.unlink(missing_ok=True)
 
         print(f"\n Batch done — {n_ok}/{len(to_process)} extracted successfully")
         if errors:
