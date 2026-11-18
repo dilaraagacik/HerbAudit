@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import re
+import threading
 import time
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
@@ -552,15 +553,6 @@ class HerbAudit:
                   f"2048 MB per-file cap — clamping to 1900 MB")
             batch_chunk_mb = 1900
 
-        print(f"  Batch mode: building payloads for {len(to_process)} image(s)...")
-        crop_workers = min(8, os.cpu_count() or 4, len(to_process))
-        with ThreadPoolExecutor(max_workers=crop_workers) as pool:
-            built = list(pool.map(
-                lambda p: (p, self._build_collage_bytes(p, max_resolution, use_collage, output_dir)),
-                to_process,
-            ))
-        payload_by_path = {p: pl for p, pl in built}
-
         # Batch jobs already submitted by an earlier run that was interrupted are
         # picked up again (their job names were saved) instead of being resubmitted
         # and paid for twice. Only images that still need a result are kept.
@@ -587,45 +579,40 @@ class HerbAudit:
         if resumed:
             print(f"  Resuming {len(resumed)} batch job(s) from an earlier run "
                   f"({len(covered)} image(s)) — not submitting those again")
-        to_submit = [p for p in to_process if p.stem not in covered]
-
+        # Streaming preparation. Sheets are prepared a few at a time (bounded
+        # look-ahead), each request is written straight into the current chunk's
+        # JSONL file, and the image bytes are dropped right away. Only small
+        # per-sheet metadata is kept, so memory stays flat however many sheets
+        # there are. A full chunk is uploaded and submitted in the background
+        # while the next one is being written.
+        print(f"  Batch mode: preparing {len(to_process)} image(s) in a stream "
+              f"({len(covered)} already submitted by an earlier run)...")
+        cfg = self._make_gemini_config(getattr(self, "temperature", 0.2))
         chunk_budget = batch_chunk_mb * 1024 * 1024
-        chunks: list[list[Path]] = []
-        current: list[Path] = []
-        current_bytes = 0
-        for img_path in to_submit:
-            # base64 inflates raw bytes ~4/3; + a small constant for the
-            # surrounding JSON/prompt text so the estimate errs conservative.
-            encoded_size = int(len(payload_by_path[img_path]["image_bytes"]) * 4 / 3) + 4096
-            if current and current_bytes + encoded_size > chunk_budget:
-                chunks.append(current)
-                current, current_bytes = [], 0
-            current.append(img_path)
-            current_bytes += encoded_size
-        if current:
-            chunks.append(current)
+        crop_workers = min(4, os.cpu_count() or 4, len(to_process))
+        meta_by_path: dict[Path, dict] = {}   # what the results step needs from each payload
+        prep_errors: dict[Path, str] = {}
+        submitted: list[dict] = []
+        jobs_lock = threading.Lock()
 
-        total_chunks = len(resumed) + len(chunks)
-        if chunks:
-            print(f" {len(chunks)} new batch chunk(s) for {len(to_submit)} image(s) "
-                  f"(~{batch_chunk_mb} MB budget each)")
+        def _save_jobs() -> None:
+            # Called with jobs_lock held. Rewritten after every submitted chunk so
+            # that an interruption at any point keeps the job names already paid for.
+            try:
+                jobs_file.write_text(json.dumps({
+                    "jobs": others + [{"job_name": i["job_name"], "model": self.model,
+                                       "chunk_idx": i["chunk_idx"],
+                                       "keys": {s: str(p) for s, p in i["keys"].items()}}
+                                      for i in resumed + submitted if i["job_name"]],
+                }, indent=2), encoding="utf-8")
+            except OSError as exc:
+                print(f"  Warning: could not save the batch job names ({exc}); "
+                      f"an interrupted run could not be resumed")
 
-        def _submit_chunk(idx: int, chunk: list[Path]) -> dict:
+        def _submit_file(idx: int, jsonl_path: Path, keys: dict) -> dict:
             # Failures here are caught and reported as a failed chunk rather
             # than raised — one bad chunk shouldn't abort the rest.
-            keys = {p.stem: p for p in chunk}
-            jsonl_path = out / f"_batch_chunk_{idx}.jsonl"
             try:
-                temperature = getattr(self, "temperature", 0.2)
-                cfg = self._make_gemini_config(temperature)
-                with open(jsonl_path, "w", encoding="utf-8") as f:
-                    for img_path in chunk:
-                        payload = payload_by_path[img_path]
-                        request_dict = self._build_batch_request_dict(
-                            payload["image_bytes"], payload["mime_type"], cfg)
-                        line = {"key": img_path.stem, "request": request_dict}
-                        f.write(json.dumps(line, ensure_ascii=False) + "\n")
-
                 uploaded = self.client.files.upload(
                     file=str(jsonl_path),
                     config=genai_types.UploadFileConfig(
@@ -636,19 +623,78 @@ class HerbAudit:
                     src=uploaded.name,
                     config={"display_name": f"herbaudit-batch-{idx}"},
                 )
-                print(f"Chunk {idx + 1}/{total_chunks} submitted — "
-                      f"{len(chunk)} image(s) — job {job.name}")
-                return {"job_name": job.name, "chunk_idx": idx, "keys": keys, "submit_error": None}
+                print(f"Chunk {idx + 1} submitted — {len(keys)} image(s) — job {job.name}")
+                info = {"job_name": job.name, "chunk_idx": idx, "keys": keys, "submit_error": None}
             except Exception as exc:
-                print(f"Chunk {idx + 1}/{total_chunks} failed to submit — {exc}")
-                return {"job_name": None, "chunk_idx": idx, "keys": keys, "submit_error": str(exc)}
+                print(f"Chunk {idx + 1} failed to submit — {exc}")
+                info = {"job_name": None, "chunk_idx": idx, "keys": keys, "submit_error": str(exc)}
             finally:
                 jsonl_path.unlink(missing_ok=True)
+            with jobs_lock:
+                submitted.append(info)
+                _save_jobs()
+            return info
 
-        with ThreadPoolExecutor(max_workers=max(1, min(batch_submit_workers, len(chunks)))) as pool:
-            new_infos = list(pool.map(lambda item: _submit_chunk(*item),
-                                      enumerate(chunks, start=len(resumed))))
+        def _prep(p: Path):
+            try:
+                pl = self._build_collage_bytes(p, max_resolution, use_collage, output_dir)
+            except Exception as exc:        # one unreadable image must not abort the run
+                return p, None, str(exc)
+            pl.pop("raw", None)             # the full decoded photo: never needed in batch mode
+            return p, pl, None
+
+        chunk = {"fh": None, "path": None, "keys": {}, "bytes": 0, "n_closed": 0}
+        job_futures: list = []
+
+        with ThreadPoolExecutor(max_workers=max(1, batch_submit_workers)) as submit_pool:
+            def _close_chunk() -> None:
+                if chunk["fh"] is None:
+                    return
+                chunk["fh"].close()
+                idx = len(resumed) + chunk["n_closed"]
+                job_futures.append(submit_pool.submit(_submit_file, idx, chunk["path"], chunk["keys"]))
+                chunk.update(fh=None, path=None, keys={}, bytes=0, n_closed=chunk["n_closed"] + 1)
+
+            with ThreadPoolExecutor(max_workers=crop_workers) as pool:
+                for n, (p, pl, err) in enumerate(
+                        _prefetch_map(pool, _prep, to_process, crop_workers * 2), 1):
+                    if err is not None:
+                        prep_errors[p] = err
+                        print(f" ERROR — {p.name}: could not prepare image: {err}")
+                        continue
+                    meta_by_path[p] = {
+                        "collage_used":  pl["collage_used"],
+                        "detector_used": pl.get("detector_used"),
+                        "img_w": pl["img_w"], "img_h": pl["img_h"],
+                        "src_w": pl["src_w"], "src_h": pl["src_h"],
+                        "sent_kb": round(len(pl["image_bytes"]) / 1024, 1),
+                    }
+                    if p.stem not in covered:
+                        # base64 inflates raw bytes ~4/3; + a small constant for the
+                        # surrounding JSON/prompt text so the estimate errs conservative.
+                        encoded_size = int(len(pl["image_bytes"]) * 4 / 3) + 4096
+                        if chunk["fh"] is not None and chunk["bytes"] + encoded_size > chunk_budget:
+                            _close_chunk()
+                        if chunk["fh"] is None:
+                            chunk["path"] = out / f"_batch_chunk_{len(resumed) + chunk['n_closed']}.jsonl"
+                            chunk["fh"] = open(chunk["path"], "w", encoding="utf-8")
+                        request_dict = self._build_batch_request_dict(
+                            pl["image_bytes"], pl["mime_type"], cfg)
+                        chunk["fh"].write(json.dumps({"key": p.stem, "request": request_dict},
+                                                     ensure_ascii=False) + "\n")
+                        chunk["keys"][p.stem] = p
+                        chunk["bytes"] += encoded_size
+                    del pl                  # free the image bytes before the next sheet arrives
+                    if n % 25 == 0 or n == len(to_process):
+                        print(f"  Prepared {n}/{len(to_process)}")
+            _close_chunk()
+            new_infos = sorted((f.result() for f in job_futures), key=lambda i: i["chunk_idx"])
+
         job_infos = resumed + new_infos
+        total_chunks = len(job_infos)
+        if new_infos:
+            print(f" {len(new_infos)} new batch chunk(s) submitted "
+                  f"(~{batch_chunk_mb} MB budget each)")
 
         # Save the job names the moment they exist, so Ctrl-C / a closed terminal /
         # a lost connection after this point loses nothing: run the same command
@@ -753,6 +799,9 @@ class HerbAudit:
         # Fold every outcome through the same taxonomy-audit + cache path the
         # live loop uses below, so results.html generation is identical either way.
         n_ok, errors = 0, []
+        for p, msg in prep_errors.items():
+            errors.append(f"{p.name}: could not prepare image: {msg}")
+            self.results.append({"source_image": p.name, "error": f"could not prepare image: {msg}"})
         for info in job_infos:
             for key, img_path in info["keys"].items():
                 outcome   = chunk_outcomes.get(key, ("error", "no result returned for this key"))
@@ -767,23 +816,23 @@ class HerbAudit:
 
                 _, record, in_tok, out_tok, thought_tok = outcome
                 record  = _normalize_record(record)
-                payload = payload_by_path[img_path]
+                meta    = meta_by_path[img_path]
                 cost_usd = self._cost_for(self.model, in_tok, out_tok)
                 cost_usd = round(cost_usd * _BATCH_COST_DISCOUNT, 6)
                 _filled = sum(1 for k in HERBARIUM_SCHEMA if str(record.get(k, "")).strip())
                 record["source_image"]  = img_path.name
                 record["model"]         = self.model
-                record["collage_used"]  = payload["collage_used"]
-                record["detector_used"] = payload.get("detector_used")
+                record["collage_used"]  = meta["collage_used"]
+                record["detector_used"] = meta.get("detector_used")
                 record["tokens_in"]     = in_tok
                 record["tokens_out"]    = out_tok
                 record["tokens_thinking"] = thought_tok
                 record["cost_usd"]      = cost_usd
-                record["image_width"]   = payload["img_w"]
-                record["image_height"]  = payload["img_h"]
-                record["precrop_width"]   = payload["src_w"]
-                record["precrop_height"]  = payload["src_h"]
-                record["sent_image_kb"]   = round(len(payload["image_bytes"]) / 1024, 1)
+                record["image_width"]   = meta["img_w"]
+                record["image_height"]  = meta["img_h"]
+                record["precrop_width"]   = meta["src_w"]
+                record["precrop_height"]  = meta["src_h"]
+                record["sent_image_kb"]   = meta["sent_kb"]
                 record["source_image_kb"] = round(img_path.stat().st_size / 1024, 1)
                 if self.provider == "gemini":
                     record["media_resolution"] = self.media_resolution
